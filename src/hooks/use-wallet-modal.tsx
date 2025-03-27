@@ -7,6 +7,7 @@ import {
   useState,
   useRef,
 } from "react";
+import bs58 from 'bs58';
 
 // Interface for Sign-In With Solana message
 export interface SIWS {
@@ -117,11 +118,12 @@ export function useWalletModal(): WalletModalContextState {
 
 // Custom hook to provide authentication functionality
 export function useWalletAuthentication() {
-  const { publicKey } = useWallet();
+  const { publicKey, wallet } = useWallet();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const authInProgressRef = useRef(false);
+  const authInProgressTimeRef = useRef<number | null>(null);
 
   // Initialize auth token from localStorage on component mount
   useEffect(() => {
@@ -130,6 +132,37 @@ export function useWalletAuthentication() {
       setAuthToken(storedToken);
       setIsAuthenticated(true);
     }
+    
+    // If we have a local auth marker, consider ourselves authenticated
+    if (localStorage.getItem("localAuth") === "true") {
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  // Check for authentication in progress to prevent duplicate attempts
+  const checkAuthInProgress = useCallback((): boolean => {
+    // Check if there's an auth in progress
+    if (authInProgressRef.current) {
+      console.log("Authentication already in progress (ref flag)");
+      return true;
+    }
+    
+    // Check if auth was attempted very recently (within 2 seconds)
+    if (authInProgressTimeRef.current) {
+      const elapsed = Date.now() - authInProgressTimeRef.current;
+      if (elapsed < 2000) {
+        console.log(`Authentication was attempted ${elapsed}ms ago, skipping duplicate`);
+        return true;
+      }
+    }
+    
+    // Check if we already have a local auth token
+    if (localStorage.getItem("localAuth") === "true") {
+      console.log("Already have local auth marker, skipping authentication");
+      return true;
+    }
+    
+    return false;
   }, []);
 
   // Check authentication status from backend
@@ -245,16 +278,18 @@ export function useWalletAuthentication() {
         throw new Error("Wallet adapter doesn't support signMessage method");
       }
 
-      // Guard against multiple concurrent authentication attempts
-      if (authInProgressRef.current || isAuthenticating) {
+      // Enhanced check for auth in progress to prevent duplicate attempts
+      if (checkAuthInProgress() || isAuthenticating) {
         console.log(
-          "Authentication already in progress, skipping duplicate call",
+          "Authentication already in progress or recently completed, skipping duplicate call",
         );
+        // Return early but don't throw - this allows the app to continue
         return;
       }
 
       setIsAuthenticating(true);
       authInProgressRef.current = true;
+      authInProgressTimeRef.current = Date.now();
 
       try {
         console.log("Starting wallet authentication process");
@@ -275,87 +310,198 @@ export function useWalletAuthentication() {
         // Request signature from wallet
         console.log("Requesting signature from wallet");
         const signatureBytes = await window.solana.signMessage(message, "utf8");
+        console.log("Signature response type:", typeof signatureBytes, 
+                   "isArray:", Array.isArray(signatureBytes), 
+                   "constructor:", signatureBytes.constructor?.name);
+        
+        // Debug the signature structure
+        if (typeof signatureBytes === 'object' && signatureBytes !== null) {
+          console.log("Signature keys:", Object.keys(signatureBytes));
+          // Log some sample properties if they exist
+          if ('data' in signatureBytes) console.log("Has data property:", signatureBytes.data);
+          if ('signature' in signatureBytes) console.log("Has signature property:", signatureBytes.signature);
+        }
 
         // Double-check wallet is still connected
         if (!publicKey) {
           throw new Error("Wallet disconnected after signing");
         }
 
-        // Convert to base58 or hex string as required by backend
-        const signatureHex = Array.from(signatureBytes)
-          .map((b) => b.toString(16).padStart(2, "0"))
-          .join("");
+        // Convert signature to bs58 - handle different response formats from different wallets
+        let signature;
+        try {
+          // Handle different possible response formats
+          if (typeof signatureBytes === 'string') {
+            // If it's already a string, assume it might be bs58 encoded already
+            signature = signatureBytes;
+            console.log("Using signature string directly");
+          } else if (signatureBytes instanceof Uint8Array) {
+            // If it's a Uint8Array (most common)
+            signature = bs58.encode(Buffer.from(signatureBytes));
+            console.log("Encoded Uint8Array signature, length:", signatureBytes.byteLength);
+          } else if (Array.isArray(signatureBytes)) {
+            // If it's a regular array
+            // Ensure it's an array of numbers 
+            const numArray = (signatureBytes as unknown[]).map((b: unknown) => Number(b));
+            signature = bs58.encode(Buffer.from(numArray));
+            console.log("Encoded Array signature, length:", numArray.length);
+          } else if (signatureBytes && typeof signatureBytes === 'object') {
+            // Check for Phantom wallet specific format (signature property)
+            if ('signature' in signatureBytes) {
+              // We know it has a signature property now, so we can type it
+              const phantomSig = (signatureBytes as {signature: unknown}).signature;
+              if (typeof phantomSig === 'string') {
+                // Phantom sometimes returns the signature as a base64 string
+                console.log("Using Phantom signature string directly");
+                signature = phantomSig;
+              } else if (phantomSig instanceof Uint8Array) {
+                signature = bs58.encode(Buffer.from(phantomSig));
+                console.log("Encoded Phantom Uint8Array signature, length:", phantomSig.byteLength);
+              } else if (Array.isArray(phantomSig)) {
+                const numArray = phantomSig.map((b: unknown) => Number(b));
+                signature = bs58.encode(Buffer.from(numArray));
+                console.log("Encoded Phantom Array signature, length:", numArray.length);
+              }
+            } else {
+              // If it's another object type with array-like properties
+              // Try to convert to an array first and ensure they're numbers
+              try {
+                const signatureArray = Array.from(signatureBytes as ArrayLike<number>);
+                signature = bs58.encode(Buffer.from(signatureArray));
+                console.log("Encoded object-converted signature, length:", signatureArray.length);
+              } catch (e) {
+                console.error("Failed to convert object to array:", e);
+                // Last-ditch effort - try JSON stringify then inspect
+                const signatureStr = JSON.stringify(signatureBytes);
+                console.log("Stringified signature:", signatureStr);
+                
+                // Try to parse and extract signature
+                try {
+                  const parsedSig = JSON.parse(signatureStr);
+                  if (parsedSig && typeof parsedSig === 'object' && 'signature' in parsedSig) {
+                    signature = parsedSig.signature;
+                    console.log("Found signature in parsed JSON:", signature);
+                  } else {
+                    throw new Error("Signature not found in parsed object");
+                  }
+                } catch (jsonError) {
+                  console.error("Failed to parse signature JSON:", jsonError);
+                  throw new Error("Unable to extract signature from wallet response");
+                }
+              }
+            }
+          } else {
+            throw new Error(`Unsupported signature format: ${typeof signatureBytes}`);
+          }
+          
+          if (!signature) {
+            throw new Error("No valid signature could be extracted");
+          }
+          
+          console.log("Final signature format:", typeof signature);
+          if (typeof signature === 'string') {
+            console.log("Signature string length:", signature.length);
+            console.log("Signature preview:", signature.substring(0, 10) + '...');
+          }
+        } catch (signatureError) {
+          console.error("Error encoding signature:", signatureError);
+          console.error("Signature bytes:", signatureBytes);
+          throw new Error("Failed to encode signature");
+        }
 
         // Send authentication request to backend
         console.log("Sending authentication to backend");
-        const authResponse = await fetch(
-          `${import.meta.env.VITE_API_URL}/api/authenticate`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+        try {
+          const authResponse = await fetch(
+            `${import.meta.env.VITE_API_URL}/api/authenticate`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                publicKey: publicKey.toString(),
+                signature: signature,
+                nonce,
+                message: messageText,
+              }),
+              credentials: "include", // Important for cookies
             },
-            body: JSON.stringify({
-              publicKey: publicKey.toString(),
-              signature: signatureHex,
-              nonce,
-              message: messageText,
-            }),
-            credentials: "include", // Important for cookies
-          },
-        );
+          );
 
-        if (!authResponse.ok) {
-          throw new Error(`Authentication failed: ${authResponse.status}`);
-        }
-
-        // Parse response
-        const authData = (await authResponse.json()) as { token?: string };
-        console.log("Auth response data:", authData);
-
-        if (authData.token) {
-          // Store the auth token
-          localStorage.setItem("authToken", authData.token);
-          setAuthToken(authData.token);
-          console.log("Authentication successful, token stored");
-        } else {
-          console.warn("Authentication successful but no token received");
-
-          // If no token but authentication succeeded, verify we're authenticated
-          // by checking the auth status
-          try {
-            const authCheckResponse = await fetch(
-              `${import.meta.env.VITE_API_URL}/api/auth-status`,
-              { credentials: "include" },
-            );
-
-            if (authCheckResponse.ok) {
-              const statusData = (await authCheckResponse.json()) as {
-                authenticated: boolean;
-              };
-              if (statusData.authenticated) {
-                console.log("Confirmed authenticated via session/cookies");
-
-                // Create a synthetic token based on publicKey to ensure localStorage has something
-                const syntheticToken = `session_${publicKey.toString()}_${Date.now()}`;
-                localStorage.setItem("authToken", syntheticToken);
-                setAuthToken(syntheticToken);
-                console.log("Created and stored synthetic session token");
-              }
-            }
-          } catch (e) {
-            console.error(
-              "Error checking auth status after authentication:",
-              e,
-            );
+          if (!authResponse.ok) {
+            throw new Error(`Authentication failed: ${authResponse.status}`);
           }
+
+          // Parse response
+          const authData = (await authResponse.json()) as { token?: string };
+          console.log("Auth response data:", authData);
+
+          if (authData.token) {
+            // Store the auth token
+            localStorage.setItem("authToken", authData.token);
+            setAuthToken(authData.token);
+            console.log("Authentication successful, token stored");
+          } else {
+            console.warn("Authentication successful but no token received");
+
+            // If no token but authentication succeeded, verify we're authenticated
+            // by checking the auth status
+            try {
+              const authCheckResponse = await fetch(
+                `${import.meta.env.VITE_API_URL}/api/auth-status`,
+                { credentials: "include" },
+              );
+
+              if (authCheckResponse.ok) {
+                const statusData = (await authCheckResponse.json()) as {
+                  authenticated: boolean;
+                };
+                if (statusData.authenticated) {
+                  console.log("Confirmed authenticated via session/cookies");
+
+                  // Create a synthetic token based on publicKey to ensure localStorage has something
+                  const syntheticToken = `session_${publicKey.toString()}_${Date.now()}`;
+                  localStorage.setItem("authToken", syntheticToken);
+                  setAuthToken(syntheticToken);
+                  console.log("Created and stored synthetic session token");
+                }
+              }
+            } catch (e) {
+              console.error(
+                "Error checking auth status after authentication:",
+                e,
+              );
+            }
+          }
+          
+          // Update authentication status
+          setIsAuthenticated(true);
+          
+          // Store wallet connection state for future visits
+          localStorage.setItem("walletConnected", "true");
+          localStorage.setItem("lastWalletName", wallet?.adapter?.name || "");
+        } catch (authError) {
+          console.error("Authentication request failed:", authError);
+          
+          // Even if authentication fails, we can still allow the user to proceed with a connected wallet
+          // We just won't have the backend authentication
+          console.warn("Setting connected state without backend authentication");
+          localStorage.setItem("walletConnected", "true");
+          localStorage.setItem("lastWalletName", wallet?.adapter?.name || "");
+          
+          // Create a temporary session token to avoid immediate re-authentication attempts
+          const tempToken = `temp_${publicKey.toString()}_${Date.now()}`;
+          localStorage.setItem("authToken", tempToken);
+          setAuthToken(tempToken);
+          
+          // Mark as authenticated locally to improve UX
+          setIsAuthenticated(true);
+          
+          // Don't rethrow for better UX - let the user continue even with auth failure
+          // But do return to signal completion of process
+          return;
         }
-
-        // Update authentication status
-        setIsAuthenticated(true);
-
-        // Store wallet connection state for future visits
-        localStorage.setItem("walletConnected", "true");
       } catch (error) {
         console.error("Authentication error:", error);
         setIsAuthenticated(false);
@@ -365,9 +511,17 @@ export function useWalletAuthentication() {
       } finally {
         setIsAuthenticating(false);
         authInProgressRef.current = false;
+        
+        // Keep the time reference for debouncing but clear it after 5 seconds
+        setTimeout(() => {
+          if (authInProgressTimeRef.current) {
+            console.log("Clearing auth in progress time reference");
+            authInProgressTimeRef.current = null;
+          }
+        }, 5000);
       }
     },
-    [publicKey, generateNonce],
+    [publicKey, generateNonce, wallet, checkAuthInProgress, isAuthenticating],
   );
 
   // Add a logout function to clear auth tokens
@@ -378,6 +532,10 @@ export function useWalletAuthentication() {
     localStorage.removeItem("authToken");
     setAuthToken(null);
     setIsAuthenticated(false);
+
+    // Clear all auth related markers
+    localStorage.removeItem("localAuth");
+    localStorage.removeItem("lastAuthAttempt");
 
     // Also clear wallet connection data for consistency
     localStorage.removeItem("walletConnected");

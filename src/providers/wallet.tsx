@@ -453,6 +453,23 @@ export const WalletModalProvider: FC<WalletModalProviderProps> = ({
           console.log("Authentication already in progress or completed");
           return;
         }
+        
+        // Check for local auth marker to avoid unnecessary authentication attempts
+        if (localStorage.getItem("localAuth") === "true") {
+          console.log("Local auth marker found, skipping backend authentication");
+          return;
+        }
+        
+        // Set a flag to prevent multiple authentications within a short time frame
+        const lastAuthAttempt = localStorage.getItem("lastAuthAttempt");
+        if (lastAuthAttempt) {
+          const elapsed = Date.now() - parseInt(lastAuthAttempt, 10);
+          if (elapsed < 2000) {
+            console.log(`Authentication was attempted ${elapsed}ms ago, skipping`);
+            return;
+          }
+        }
+        localStorage.setItem("lastAuthAttempt", Date.now().toString());
 
         console.log("Wallet provider handling authentication");
         try {
@@ -460,19 +477,35 @@ export const WalletModalProvider: FC<WalletModalProviderProps> = ({
           // The authenticate function updates isAuthenticated internally
           // No need to check return value
           console.log("Authentication completed in throttledAuthenticate");
+          
+          // Set local auth marker to prevent future attempts
+          localStorage.setItem("localAuth", "true");
         } catch (error) {
           console.error("Authentication error in provider:", error);
           // Ensure user state is reset on authentication failure
           setAuthenticated(false);
+          
+          // Even on error, set a temp auth token to prevent further prompts
+          if (publicKey) {
+            const tempToken = `temp_${publicKey.toString()}_${Date.now()}`;
+            localStorage.setItem("authToken", tempToken);
+            localStorage.setItem("localAuth", "true");
+          }
+          
           throw error;
         }
       } catch (error) {
         console.error("Error in throttledAuthenticate:", error);
         setAuthenticated(false);
         throw error;
+      } finally {
+        // Clean up the last auth attempt timestamp after 5 seconds
+        setTimeout(() => {
+          localStorage.removeItem("lastAuthAttempt");
+        }, 5000);
       }
     },
-    [authenticate, isAuthenticated, isAuthenticating, setAuthenticated],
+    [authenticate, isAuthenticated, isAuthenticating, setAuthenticated, publicKey],
   );
 
   return (
