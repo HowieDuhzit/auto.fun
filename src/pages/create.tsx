@@ -709,8 +709,13 @@ export const Create = () => {
     onPromptChange: ((prompt: string) => void) | null;
   }>({ setPrompt: null, onPromptChange: null });
   
+  // Import-related state
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState<{ type: 'success' | 'error' | 'warning', message: string } | null>(null);
+  const [hasStoredToken, setHasStoredToken] = useState(false);
+  
   // Tab state
-  const [activeTab, setActiveTab] = useState<FormTab>(FormTab.AUTO);
+  const [activeTab, setActiveTab] = useState<FormTab>(FormTab.IMPORT);
   const [userPrompt, setUserPrompt] = useState("");
   const [isProcessingPrompt, setIsProcessingPrompt] = useState(false);
 
@@ -728,6 +733,7 @@ export const Create = () => {
       discord: "",
       agentLink: "",
     },
+    importAddress: "",
   });
 
   // Error state
@@ -738,6 +744,7 @@ export const Create = () => {
     prompt: "",
     initial_sol: "",
     userPrompt: "",
+    importAddress: "",
   });
 
   // Ref to track if we've already auto-generated
@@ -864,7 +871,8 @@ export const Create = () => {
         throw new Error("Failed to generate image for token");
       }
 
-      const imageData = (await imageResponse.json()) as GenerateImageResponse;
+      const imageData =
+        (await imageResponse.json()) as GenerateImageResponse;
       
       
       if (!imageData.success || !imageData.mediaUrl) {
@@ -958,6 +966,91 @@ export const Create = () => {
     // The generateFromPrompt function will only be called when
     // the user clicks the "Generate" button
   }, [activeTab, generateFromPrompt]);
+
+  // Check for previously imported token data
+  useEffect(() => {
+    const storedTokenData = localStorage.getItem('import_token_data');
+    if (storedTokenData) {
+      try {
+        const tokenData = JSON.parse(storedTokenData);
+        
+        // Set flag to indicate we have stored token data
+        setHasStoredToken(true);
+        
+        // If we have a connected wallet now, check if it matches the creator wallet
+        if (publicKey && tokenData.needsWalletSwitch) {
+          const isCreatorNow = 
+            (tokenData.updateAuthority && tokenData.updateAuthority === publicKey.toString()) || 
+            (tokenData.creators && tokenData.creators.includes(publicKey.toString()));
+          
+          // If the wallet now matches a creator, update the status
+          if (isCreatorNow) {
+            setImportStatus({
+              type: 'success',
+              message: 'Wallet matched! You can now register this token.',
+            });
+            
+            // Update the token data to reflect the new creator status
+            tokenData.isCreator = true;
+            tokenData.needsWalletSwitch = false;
+            localStorage.setItem('import_token_data', JSON.stringify(tokenData));
+          } else {
+            // Still not the right wallet
+            setImportStatus({
+              type: 'warning',
+              message: 'You need to connect with the token creator wallet to register this token',
+            });
+          }
+        }
+        
+        // Populate the form with the stored data
+        setForm(prev => ({
+          ...prev,
+          name: tokenData.name || "",
+          symbol: tokenData.symbol || "",
+          description: tokenData.description || "",
+          importAddress: tokenData.mint || "",
+          links: {
+            twitter: tokenData.twitter || "",
+            telegram: tokenData.telegram || "",
+            website: tokenData.website || "",
+            discord: tokenData.discord || "",
+            agentLink: prev.links.agentLink,
+          }
+        }));
+        
+        // If the token has an image, load it
+        if (tokenData.image) {
+          fetch(tokenData.image)
+            .then(r => r.blob())
+            .then(blob => {
+              const imageFile = new File([blob], "imported-image.png", {
+                type: "image/png",
+              });
+              
+              hasCreatedUrlFromImage.current = false;
+              setImageFile(imageFile);
+              
+              const previewUrl = URL.createObjectURL(blob);
+              setCoinDropImageUrl(previewUrl);
+              
+              if (previewSetterRef.current) {
+                previewSetterRef.current(previewUrl);
+              }
+            })
+            .catch(err => {
+              console.error("Failed to load stored token image:", err);
+            });
+        }
+        
+        // Keep the user on their current tab - don't force switching to Manual tab
+        
+      } catch (error) {
+        console.error("Error parsing stored token data:", error);
+        localStorage.removeItem('import_token_data');
+      }
+    }
+  }, [publicKey]); // Re-run when wallet changes
 
   // When imageFile changes, create a temporary URL for CoinDrop (without updating the prompt)
   useEffect(() => {
@@ -1236,6 +1329,28 @@ export const Create = () => {
         throw new Error("Wallet not connected");
       }
 
+      // Check if we're working with imported token data
+      const storedTokenData = localStorage.getItem('import_token_data');
+      if (storedTokenData) {
+        try {
+          const tokenData = JSON.parse(storedTokenData);
+          
+          // Check if the current wallet has permission to create this token
+          const isCreatorNow = 
+            (tokenData.updateAuthority && tokenData.updateAuthority === publicKey.toString()) || 
+            (tokenData.creators && tokenData.creators.includes(publicKey.toString()));
+          
+          if (!isCreatorNow) {
+            throw new Error("You need to connect with the token's creator wallet to register it");
+          }
+        } catch (error) {
+          console.error("Error checking token ownership:", error);
+          if (error instanceof Error) {
+            throw error; // Re-throw if it's a permission error
+          }
+        }
+      }
+
       // Generate a new keypair for the token mint
       const mintKeypair = Keypair.generate();
       const tokenMint = mintKeypair.publicKey.toBase58();
@@ -1328,6 +1443,10 @@ export const Create = () => {
         console.warn("Continuing despite token creation confirmation failure");
       }
 
+      // Clear imported token data from localStorage if it exists
+      localStorage.removeItem('import_token_data');
+      setHasStoredToken(false);
+
       // Redirect to token page using the mint public key
       navigate(`/token/${tokenMint}`);
     } catch (error) {
@@ -1376,6 +1495,227 @@ export const Create = () => {
     !errors.symbol &&
     !errors.description &&
     !errors.initial_sol;
+
+  // Import token from address
+  const importTokenFromAddress = async () => {
+    // Validate the address
+    if (!form.importAddress || form.importAddress.trim().length < 32) {
+      setErrors((prev) => ({
+        ...prev,
+        importAddress: "Please enter a valid token address",
+      }));
+      return;
+    }
+
+    setErrors((prev) => ({
+      ...prev,
+      importAddress: "",
+    }));
+
+    setIsImporting(true);
+    setImportStatus(null);
+
+    try {
+      // Get auth token from localStorage
+      const authToken = localStorage.getItem("authToken");
+
+      // Prepare headers
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      if (authToken) {
+        headers["Authorization"] = `Bearer ${authToken}`;
+      }
+
+      try {
+        // Fetch token data from a special search endpoint that can find any token
+        const response = await fetch(
+          `${import.meta.env.VITE_API_URL}/api/search-token`,
+          {
+            method: "POST",
+            headers,
+            credentials: "include",
+            body: JSON.stringify({
+              mint: form.importAddress,
+              requestor: publicKey ? publicKey.toString() : ""
+            }),
+          }
+        );
+
+        // Define the expected token data interface
+        interface TokenData {
+          name?: string;
+          symbol?: string;
+          description?: string;
+          creator?: string;
+          creators?: string[];
+          image?: string;
+          mint: string;
+          // Social links might be in metadata extensions
+          twitter?: string;
+          telegram?: string;
+          website?: string;
+          discord?: string;
+          // Ownership info
+          isCreator: boolean;
+          updateAuthority?: string;
+          needsWalletSwitch?: boolean;
+        }
+
+        // Check if the request was successful
+        if (!response.ok) {
+          // First try to parse error from response
+          try {
+            const errorData = await response.json() as { error?: string };
+            if (errorData.error) {
+              throw new Error(errorData.error);
+            }
+          } catch (parseError) {
+            // If we can't parse the error, show a more friendly message
+            if (response.status === 404) {
+              throw new Error("The token doesn't exist or doesn't have metadata.");
+            } else {
+              throw new Error(`Server error (${response.status}): Unable to retrieve token data.`);
+            }
+          }
+        }
+        
+        const tokenData = await response.json() as TokenData;
+
+        // Store token data in localStorage for cross-wallet persistence
+        localStorage.setItem('import_token_data', JSON.stringify(tokenData));
+        setHasStoredToken(true);
+        
+        // Update form with token data
+        setForm((prev) => ({
+          ...prev,
+          name: tokenData.name || "",
+          symbol: tokenData.symbol || "",
+          description: tokenData.description || "",
+          links: {
+            twitter: tokenData.twitter || "",
+            telegram: tokenData.telegram || "",
+            website: tokenData.website || "",
+            discord: tokenData.discord || "",
+            agentLink: prev.links.agentLink,
+          },
+        }));
+
+        // If token has an image, fetch and set it
+        if (tokenData.image) {
+          try {
+            setImportStatus({
+              type: 'success',
+              message: 'Token found, loading image...',
+            });
+            
+            const imageBlob = await fetch(tokenData.image).then((r) => {
+              if (!r.ok) throw new Error("Failed to fetch image");
+              return r.blob();
+            });
+            
+            const imageFile = new File([imageBlob], "imported-image.png", {
+              type: "image/png",
+            });
+            
+            // Reset the flag before setting the new image file
+            hasCreatedUrlFromImage.current = false;
+            setImageFile(imageFile);
+            
+            // Create a preview URL for display
+            const previewUrl = URL.createObjectURL(imageBlob);
+            setCoinDropImageUrl(previewUrl);
+            
+            // Directly update the preview in FormImageInput
+            if (previewSetterRef.current) {
+              previewSetterRef.current(previewUrl);
+            }
+          } catch (imageError) {
+            console.error("Error loading token image:", imageError);
+            setImportStatus({
+              type: 'warning',
+              message: 'Token imported, but image could not be loaded',
+            });
+          }
+        }
+
+        // Show warning if user needs to switch wallets
+        if (tokenData.needsWalletSwitch) {
+          setImportStatus({
+            type: 'warning',
+            message: 'You need to connect with the token creator wallet to register this token',
+          });
+        } else {
+          // Show success message
+          setImportStatus({
+            type: 'success',
+            message: 'Token imported successfully',
+          });
+          
+          // Clear localStorage data since we don't need it anymore
+          localStorage.removeItem('import_token_data');
+        }
+        
+        // Keep the user on their current tab - don't force switching to Manual tab
+        
+      } catch (fetchError) {
+        console.error("API Error:", fetchError);
+        
+        setImportStatus({
+          type: 'error',
+          message: fetchError instanceof Error 
+            ? fetchError.message
+            : 'Failed to import token'
+        });
+      }
+      
+    } catch (error) {
+      console.error("Error importing token:", error);
+      setImportStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to import token',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  // Function to clear imported token data
+  const clearImportedToken = useCallback(() => {
+    // Remove from localStorage
+    localStorage.removeItem('import_token_data');
+    setHasStoredToken(false);
+    
+    // Reset form
+    setForm(prev => ({
+      ...prev,
+      name: "",
+      symbol: "",
+      description: "",
+      importAddress: "",
+      links: {
+        twitter: "",
+        telegram: "",
+        website: "",
+        discord: "",
+        agentLink: prev.links.agentLink,
+      }
+    }));
+    
+    // Clear image
+    setImageFile(null);
+    setCoinDropImageUrl(null);
+    if (previewSetterRef.current) {
+      previewSetterRef.current(null);
+    }
+    
+    // Clear status
+    setImportStatus(null);
+    
+    // Switch back to Import tab
+    setActiveTab(FormTab.IMPORT);
+  }, [setForm, setImageFile, setCoinDropImageUrl, previewSetterRef]);
 
   return (
     <div className="flex flex-col items-center justify-center">
@@ -1500,10 +1840,109 @@ export const Create = () => {
           {/* Import Tab Content */}
           {activeTab === FormTab.IMPORT && (
             <div className="mb-6">
-              <div className="flex flex-col items-center justify-center p-8 border border-dashed border-neutral-600 rounded bg-[#0F0F0F]">
-                <p className="text-neutral-400 mb-4">
-                  Import functionality coming soon.
-                </p>
+              <div className="flex flex-col gap-4">
+                <div className="text-lg text-white mb-2">
+                  Import an existing token by address
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-4">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={form.importAddress || ""}
+                        onChange={(e) => handleChange("importAddress", e.target.value)}
+                        placeholder="Enter any Solana token address (mint)"
+                        className="w-full bg-[#0F0F0F] py-2.5 pl-3 pr-10 border border-neutral-800 text-white"
+                      />
+                      {isImporting && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <div className="w-5 h-5 border-2 border-[#2fd345] border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={importTokenFromAddress}
+                      disabled={isImporting || !form.importAddress?.trim()}
+                      className="bg-[#2fd345] px-6 py-2.5 font-bold text-black hover:bg-[#27b938] transition-colors disabled:opacity-50 disabled:bg-[#333333] disabled:hover:bg-[#333333]"
+                    >
+                      {isImporting ? "Searching..." : "Search Token"}
+                    </button>
+                    
+                    {hasStoredToken && (
+                      <button
+                        type="button"
+                        onClick={clearImportedToken}
+                        className="bg-gray-700 px-6 py-2.5 font-bold text-white hover:bg-gray-600 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                  {errors.importAddress && (
+                    <div className="text-red-500 text-sm">{errors.importAddress}</div>
+                  )}
+                  {importStatus && (
+                    <div className={`flex items-center gap-2 text-sm ${importStatus.type === 'error' ? 'text-red-500' : importStatus.type === 'warning' ? 'text-yellow-500' : 'text-green-500'}`}>
+                      {importStatus.type === 'success' ? (
+                        <Icons.Check className="w-4 h-4" />
+                      ) : importStatus.type === 'warning' ? (
+                        <Icons.Warning className="w-4 h-4" />
+                      ) : (
+                        <Icons.XCircle className="w-4 h-4" />
+                      )}
+                      {importStatus.message}
+                      {importStatus.type === 'warning' && hasStoredToken && (
+                        <button
+                          type="button"
+                          onClick={clearImportedToken}
+                          className="ml-2 text-xs underline hover:text-white"
+                        >
+                          Clear Import
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="bg-[#161616] p-5 rounded-md">
+                  <div className="flex items-start gap-3">
+                    <div className="text-[#2fd345] mt-1">
+                      <Icons.Info className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-white text-sm font-bold mb-3">
+                        Import and register any token on Solana
+                      </p>
+                      
+                      <p className="text-neutral-300 text-sm mb-3">
+                        This tool allows you to:
+                      </p>
+                      
+                      <ul className="text-neutral-400 text-sm list-disc ml-4 space-y-2 mb-3">
+                        <li>Search for any token by its mint address</li>
+                        <li>View the token's metadata and details</li>
+                        <li>Register tokens you have permission to create</li>
+                      </ul>
+                      
+                      <div className="border-t border-neutral-800 pt-3 mt-2">
+                        <p className="text-neutral-300 text-sm mb-2">
+                          <span className="font-bold text-yellow-500">Important:</span> To register a token, 
+                          you must be connected with a wallet that either:
+                        </p>
+                        <ul className="text-neutral-400 text-sm list-disc ml-4 space-y-1 mb-3">
+                          <li>Is the token's update authority</li>
+                          <li>Is verified as a token creator</li>
+                        </ul>
+                        <p className="text-neutral-300 text-xs">
+                          If you find a token but don't have permission to register it, you'll need to 
+                          switch to the appropriate wallet. Your search results will be preserved.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
