@@ -1,9 +1,8 @@
 import { ChartTable, IToken, TSortBy, TSortOrder } from "@/types";
 import { QueryClient } from "@tanstack/react-query";
+import { env } from "./env";
 
 export const queryClient = new QueryClient();
-
-const BASE_URL = import.meta.env.VITE_API_URL;
 
 const fetcher = async (
   endpoint: string,
@@ -21,7 +20,7 @@ const fetcher = async (
     query.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, query as object);
+  const response = await fetch(`${env.apiUrl}${endpoint}`, query as object);
 
   if (!response.ok) {
     throw new Error(response.statusText);
@@ -144,3 +143,21 @@ export const getChartTable = async ({
     return undefined;
   }
 }
+
+// export const uploadMetadata = async (metadata: TokenMetadata) => {
+//   const response = await fetcher('/api/upload', 'POST', {
+//     image: metadata.imageBase64,
+//     metadata: {
+//       name: metadata.name,
+//       symbol: metadata.symbol,
+//       description: metadata.description,
+//       twitter: metadata.links.twitter,
+//       telegram: metadata.links.telegram,
+//       website: metadata.links.website,
+//       discord: metadata.links.discord,
+//       agentLink: metadata.links.agentLink,
+//     },
+//   }) as {metadataUrl: string};
+  
+//   return response.metadataUrl;
+// };

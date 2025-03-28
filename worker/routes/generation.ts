@@ -695,7 +695,7 @@ app.post("/generate-metadata", async (c) => {
       metadata,
     });
   } catch (error) {
-    console.error("Error generating metadata:", error);
+    console.error("Error generating metadata:");
     return c.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       500,
@@ -1326,7 +1326,7 @@ async function generateMetadata(env: Env) {
 
     return metadata;
   } catch (error) {
-    logger.error("Error generating metadata:", error);
+    logger.error("Error generating metadata:");
     return null;
   }
 }
