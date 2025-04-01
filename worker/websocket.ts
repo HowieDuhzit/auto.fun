@@ -139,7 +139,7 @@ export class WebSocketDO {
     server.addEventListener("message", async (event: MessageEvent) => {
       try {
         const message = JSON.parse(event.data as string);
-        await this.handleClientMessage(clientId, message);
+        await this.handleMessage(clientId, message);
       } catch (err) {
         logger.error("Error handling WebSocket message:", err);
       }
@@ -165,9 +165,9 @@ export class WebSocketDO {
   }
 
   // Handle client-to-server messages
-  private async handleClientMessage(
+  private async handleMessage(
     clientId: string,
-    message: any,
+    message: any
   ): Promise<void> {
     if (!message || !message.event) return;
 
@@ -232,6 +232,36 @@ export class WebSocketDO {
 
       case "tokenBalanceUpdate":
         await this.handleTokenBalance(clientId, data);
+        break;
+
+      case "tokenHolders":
+        await this.handleTokenHolders(clientId, data);
+        break;
+
+      case "tokenTransactions":
+        await this.handleTokenTransactions(clientId, data);
+        break;
+
+      case "tokenMarketMetrics":
+        await this.handleTokenMarketMetrics(clientId, data);
+        break;
+
+      // Also handle events with the event field (client should be consistent, but handle both)
+      case "event": 
+        switch (message.event) {
+          case "tokenHolders":
+            await this.handleTokenHolders(clientId, message.data);
+            break;
+          case "tokenTransactions":
+            await this.handleTokenTransactions(clientId, message.data);
+            break;
+          case "tokenMarketMetrics":
+            await this.handleTokenMarketMetrics(clientId, message.data);
+            break;
+          default:
+            // Handle other event types
+            break;
+        }
         break;
 
       default:
@@ -927,6 +957,240 @@ export class WebSocketDO {
       return this.sendToClient(clientId, "tokenBalanceUpdate", {
         error: "Server error processing token balance request",
         balance: 0
+      });
+    }
+  }
+
+  // Handle request for token holders
+  private async handleTokenHolders(
+    clientId: string,
+    data: any
+  ): Promise<void> {
+    try {
+      if (!data?.mint) {
+        this.sendToClient(clientId, "tokenHolders", {
+          error: "Missing token mint address",
+          holders: [],
+          total: 0
+        });
+        return;
+      }
+      
+      const mint = data.mint;
+      logger.log(`WebSocket request for token holders: ${mint}`);
+      
+      try {
+        // For production: Call the API to get token holders
+        if (this.env.VITE_API_URL) {
+          const url = new URL(`${this.env.VITE_API_URL}/api/token/${mint}/holders`);
+          
+          const response = await fetch(url.toString());
+          
+          if (response.ok) {
+            const holdersData = await response.json();
+            logger.log(`Token holders for ${mint} fetched successfully from API: ${holdersData.holders?.length || 0} holders`);
+            this.sendToClient(clientId, "tokenHolders", {
+              mint,
+              holders: holdersData.holders || [],
+              total: holdersData.total || 0
+            });
+          } else {
+            logger.error(`Error fetching token holders from API: ${response.status}`);
+            // Return whatever we can - client will handle gracefully
+            this.sendToClient(clientId, "tokenHolders", {
+              mint,
+              error: `Failed to fetch holders: ${response.status}`,
+              holders: [],
+              total: 0
+            });
+          }
+        } else {
+          // For development: Create mock holders
+          logger.log(`Returning mock holders for ${mint} (dev environment)`);
+          
+          const mockHolders = [
+            {
+              address: "DvmXXp4tSXYwZJhM5HjtEUvQ6SfxwkA7daE1jQgCX1ri",
+              balance: 680000,
+              percentage: 68
+            },
+            {
+              address: "HWHvQhFmJB3NUcu1aihKmrKegfVxBEHzwVX6yZCKEsi1",
+              balance: 320000,
+              percentage: 32
+            }
+          ];
+          
+          this.sendToClient(clientId, "tokenHolders", {
+            mint,
+            holders: mockHolders,
+            total: mockHolders.length
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(`Error fetching token holders: ${errorMessage}`);
+        
+        // Send an error response to the client
+        this.sendToClient(clientId, "tokenHolders", {
+          mint,
+          error: `Error fetching holders: ${errorMessage}`,
+          holders: [],
+          total: 0
+        });
+      }
+    } catch (error) {
+      logger.error("Error in handleTokenHolders:", error);
+      this.sendToClient(clientId, "tokenHolders", {
+        error: "Server error processing holders request",
+        holders: [],
+        total: 0
+      });
+    }
+  }
+  
+  // Handle request for token transactions
+  private async handleTokenTransactions(
+    clientId: string,
+    data: any
+  ): Promise<void> {
+    try {
+      if (!data?.mint) {
+        this.sendToClient(clientId, "tokenTransactions", {
+          error: "Missing token mint address",
+          swaps: [],
+          total: 0
+        });
+        return;
+      }
+      
+      const mint = data.mint;
+      const limit = data.limit || 10;
+      
+      logger.log(`WebSocket request for token transactions: ${mint} (limit: ${limit})`);
+      
+      try {
+        // Call the API to get token transactions
+        const url = new URL(`${this.env.VITE_API_URL}/api/swaps/${mint}`);
+        url.searchParams.append("limit", limit.toString());
+        
+        const response = await fetch(url.toString());
+        
+        if (response.ok) {
+          const swapsData = await response.json();
+          logger.log(`Token transactions for ${mint} fetched successfully: ${swapsData.swaps?.length || 0} swaps`);
+          this.sendToClient(clientId, "tokenTransactions", {
+            mint,
+            swaps: swapsData.swaps || [],
+            total: swapsData.total || 0
+          });
+        } else {
+          logger.error(`Error fetching token transactions: ${response.status}`);
+          this.sendToClient(clientId, "tokenTransactions", {
+            mint,
+            error: `Failed to fetch transactions: ${response.status}`,
+            swaps: [],
+            total: 0
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(`Error fetching token transactions: ${errorMessage}`);
+        
+        this.sendToClient(clientId, "tokenTransactions", {
+          mint,
+          error: `Error fetching transactions: ${errorMessage}`,
+          swaps: [],
+          total: 0
+        });
+      }
+    } catch (error) {
+      logger.error("Error in handleTokenTransactions:", error);
+      this.sendToClient(clientId, "tokenTransactions", {
+        error: "Server error processing transactions request",
+        swaps: [],
+        total: 0
+      });
+    }
+  }
+
+  // Handle request for token market metrics
+  private async handleTokenMarketMetrics(
+    clientId: string,
+    data: any
+  ): Promise<void> {
+    try {
+      if (!data?.mint) {
+        this.sendToClient(clientId, "tokenMarketMetrics", {
+          error: "Missing token mint address",
+          metrics: null
+        });
+        return;
+      }
+      
+      const mint = data.mint;
+      logger.log(`WebSocket request for token market metrics: ${mint}`);
+      
+      try {
+        // For production: Call the API to get token market metrics
+        if (this.env.VITE_API_URL) {
+          const url = new URL(`${this.env.VITE_API_URL}/api/token/${mint}/metrics`);
+          
+          const response = await fetch(url.toString());
+          
+          if (response.ok) {
+            const metricsData = await response.json();
+            logger.log(`Token market metrics for ${mint} fetched successfully from API`);
+            this.sendToClient(clientId, "tokenMarketMetrics", {
+              mint,
+              metrics: metricsData
+            });
+          } else {
+            logger.error(`Error fetching token market metrics from API: ${response.status}`);
+            // Return whatever we can - client will handle gracefully
+            this.sendToClient(clientId, "tokenMarketMetrics", {
+              mint,
+              error: `Failed to fetch market metrics: ${response.status}`,
+              metrics: null
+            });
+          }
+        } else {
+          // For development: Return mock market metrics data
+          // This simulates what the API would return without requiring the actual API
+          logger.log(`Returning mock market metrics for ${mint} (dev environment)`);
+          
+          const mockMetrics = {
+            marketCapUSD: 12500000, // $12.5M
+            volume24h: 250000,      // $250K
+            currentPrice: 0.000025, // in SOL
+            tokenPriceUSD: 0.0032,  // in USD
+            solPriceUSD: 128.0,     // SOL price in USD
+            priceChange24h: 5.2,    // 5.2%
+            price24hAgo: 0.0000238, // in SOL
+            totalSupply: 500000000, // 500M tokens
+            holderCount: 1200       // 1,200 holders
+          };
+          
+          this.sendToClient(clientId, "tokenMarketMetrics", {
+            mint,
+            metrics: mockMetrics
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        logger.error(`Error fetching token market metrics: ${errorMessage}`);
+        
+        this.sendToClient(clientId, "tokenMarketMetrics", {
+          mint,
+          error: `Error fetching market metrics: ${errorMessage}`,
+          metrics: null
+        });
+      }
+    } catch (error) {
+      logger.error("Error in handleTokenMarketMetrics:", error);
+      this.sendToClient(clientId, "tokenMarketMetrics", {
+        error: "Server error processing market metrics request",
+        metrics: null
       });
     }
   }

@@ -22,13 +22,13 @@ import {
   shortenAddress,
 } from "@/utils";
 import { getToken } from "@/utils/api";
-import { fetchTokenMarketMetrics } from "@/utils/blockchain";
 import { useTokenWebSocket } from "@/hooks/use-websocket";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Globe, Info as InfoCircle } from "lucide-react";
 import { useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { toast } from "react-toastify";
+import { useTokenMarketMetrics } from "@/hooks/use-websocket-data";
 
 export default function Page() {
   const params = useParams();
@@ -38,6 +38,16 @@ export default function Page() {
   
   // Use token-specific websocket
   const { addEventListener, connected: wsConnected } = useTokenWebSocket(address);
+
+  // Fetch real-time blockchain metrics for this token using WebSocket
+  const { 
+    metrics, 
+    loading: metricsLoading, 
+    error: metricsError, 
+    refetch: refetchMetrics 
+  } = useTokenMarketMetrics(address);
+
+  console.log(`Token page: Using WebSocket for market metrics. Loading: ${metricsLoading}, Error: ${metricsError}`);
 
   // Fetch token details from API
   const tokenQuery = useQuery({
@@ -55,52 +65,6 @@ export default function Page() {
     },
     // Reduce polling frequency when using websockets
     refetchInterval: wsConnected ? 60_000 : 20_000,
-  });
-
-  // Fetch token market metrics from blockchain
-  const metricsQuery = useQuery({
-    queryKey: ["blockchain-metrics", address],
-    queryFn: async () => {
-      if (!address) throw new Error("No address passed");
-      try {
-        console.log(`Token page: Fetching blockchain metrics for ${address}`);
-        const metrics = await fetchTokenMarketMetrics(address);
-        console.log(`Token page: Received blockchain metrics:`, metrics);
-
-        // Validate the data - if all values are 0, it might indicate an issue
-        const hasValidData =
-          metrics.marketCapUSD > 0 ||
-          metrics.currentPrice > 0 ||
-          metrics.volume24h > 0;
-
-        if (!hasValidData) {
-          console.warn(
-            `Token page: Blockchain metrics may be invalid - all key values are 0`,
-          );
-        } else {
-          toast.success("Real-time blockchain data loaded successfully!", {
-            position: "bottom-right",
-            autoClose: 3000,
-          });
-        }
-
-        return metrics;
-      } catch (error) {
-        console.error(`Token page: Error fetching blockchain metrics:`, error);
-        toast.error(
-          "Error fetching real-time blockchain data. Using cached values.",
-          {
-            position: "bottom-right",
-            autoClose: 5000,
-          },
-        );
-        return null;
-      }
-    },
-    enabled: !!address,
-    // Reduce polling frequency when using websockets
-    refetchInterval: wsConnected ? 2 * 60_000 : 30_000,
-    staleTime: 60000, // Data stays fresh for 1 minute
   });
 
   // Set up WebSocket listeners for real-time updates
@@ -131,7 +95,7 @@ export default function Page() {
     const removeSwapListener = addEventListener<SwapEvent>("newSwap", (swap) => {
       console.log("Received new swap via WebSocket:", swap);
       // Trigger a refetch of metrics
-      metricsQuery.refetch();
+      refetchMetrics();
       
       // Update the token data if needed
       if (swap.token) {
@@ -162,10 +126,9 @@ export default function Page() {
       removeSwapListener();
       removeHoldersListener();
     };
-  }, [address, addEventListener, metricsQuery, queryClient]);
+  }, [address, addEventListener, refetchMetrics, queryClient]);
 
   const token = tokenQuery?.data as IToken;
-  const metrics = metricsQuery?.data;
 
   // Use real blockchain data if available, otherwise fall back to API data
   const solPriceUSD =
@@ -213,8 +176,8 @@ export default function Page() {
     finalTokenUSDPrice,
     graduationMarketCap,
     metricsAvailable: !!metrics,
-    metricsLoading: metricsQuery.isLoading,
-    metricsError: metricsQuery.isError,
+    metricsLoading,
+    metricsError,
     websocketConnected: wsConnected
   });
 
@@ -359,7 +322,7 @@ export default function Page() {
               </span>
               <span className="text-xl font-dm-mono text-autofun-text-primary">
                 {tokenPriceUSD ? formatNumberSubscript(tokenPriceUSD) : "$0.00"}
-                {metricsQuery.isLoading && (
+                {metricsLoading && (
                   <span className="text-xs text-autofun-text-secondary ml-1">
                     loading...
                   </span>
@@ -374,7 +337,7 @@ export default function Page() {
                 {currentPrice
                   ? formatNumberSubscript(currentPrice)
                   : "0.00000000"}
-                {metricsQuery.isLoading && (
+                {metricsLoading && (
                   <span className="text-xs text-autofun-text-secondary ml-1">
                     loading...
                   </span>
@@ -425,12 +388,12 @@ export default function Page() {
             </span>
             <span className="text-xl font-dm-mono text-autofun-text-highlight">
               {marketCapUSD > 0 ? abbreviateNumber(marketCapUSD) : "-"}
-              {metricsQuery.isLoading && (
+              {metricsLoading && (
                 <span className="text-xs text-autofun-text-secondary ml-1">
                   loading...
                 </span>
               )}
-              {!marketCapUSD && !metricsQuery.isLoading && (
+              {!marketCapUSD && !metricsLoading && (
                 <span className="text-xs text-autofun-text-secondary ml-1">
                   <Link
                     to={`https://solscan.io/token/${token?.mint}`}
@@ -450,12 +413,12 @@ export default function Page() {
             </span>
             <span className="text-xl font-dm-mono text-autofun-text-primary">
               {volume24h > 0 ? abbreviateNumber(volume24h) : "-"}
-              {metricsQuery.isLoading && (
+              {metricsLoading && (
                 <span className="text-xs text-autofun-text-secondary ml-1">
                   loading...
                 </span>
               )}
-              {!volume24h && !metricsQuery.isLoading && (
+              {!volume24h && !metricsLoading && (
                 <span className="text-xs text-autofun-text-secondary ml-1">
                   <Link
                     to={`https://solscan.io/token/${token?.mint}#trade`}

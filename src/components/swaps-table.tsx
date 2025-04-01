@@ -7,11 +7,12 @@ import {
   TableRow,
 } from "@/components/ui/table-raw";
 import usePause from "@/hooks/use-pause";
+import { useTokenTransactions } from "@/hooks/use-websocket-data";
 import { IToken } from "@/types";
 import { fromNow, shortenAddress } from "@/utils";
-import { fetchTokenTransactions, TokenTransaction } from "@/utils/blockchain";
-import { useQuery } from "@tanstack/react-query";
+import { TokenTransaction } from "@/utils/blockchain";
 import { ExternalLink, RefreshCw } from "lucide-react";
+import React from "react";
 import { Link } from "react-router";
 import { twMerge } from "tailwind-merge";
 import PausedIndicator from "./paused-indicator";
@@ -23,30 +24,33 @@ export default function SwapsTable({ token }: { token: IToken }) {
     `SwapsTable: Rendering for token ${token?.ticker} (${token?.mint})`,
   );
 
-  const query = useQuery({
-    queryKey: ["blockchain-swaps", token?.mint],
-    queryFn: async () => {
-      console.log(
-        `SwapsTable: Fetching swaps directly from blockchain for ${token?.mint}`,
-      );
-      try {
-        const result = await fetchTokenTransactions(token?.mint);
-        console.log(
-          `SwapsTable: Retrieved ${result.total} transactions from blockchain`,
-        );
-        return result;
-      } catch (error) {
-        console.error(`SwapsTable: Error fetching transactions data:`, error);
-        return { swaps: [], total: 0 };
-      }
-    },
-    enabled: !paused && token?.mint ? true : false,
-    refetchInterval: 30000, // Longer interval for blockchain queries
-    staleTime: 60000, // Data stays fresh for 1 minute
-  });
+  // Use the WebSocket hook instead of React Query
+  const { swaps, loading, error, refetch } = useTokenTransactions(token?.mint);
 
-  const isLoading = query.isLoading;
-  const data = query?.data?.swaps || [];
+  // Only refetch when not paused
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  
+  React.useEffect(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    
+    // Only set up interval if not paused
+    if (!paused && token?.mint) {
+      intervalRef.current = setInterval(() => {
+        console.log(`SwapsTable: Auto-refreshing swaps data for ${token?.mint}`);
+        refetch();
+      }, 30000); // 30 seconds interval
+    }
+    
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [paused, token?.mint, refetch]);
 
   // Helper to format swap amounts based on type
   const formatSwapAmount = (amount: number | string, isToken: boolean) => {
@@ -88,19 +92,36 @@ export default function SwapsTable({ token }: { token: IToken }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {isLoading ? (
+        {loading ? (
           <TableRow>
             <TableCell colSpan={6} className="text-center py-8">
               <div className="flex flex-col items-center gap-2">
                 <RefreshCw className="animate-spin size-5 text-autofun-text-secondary" />
                 <p className="text-autofun-text-secondary">
-                  Fetching transactions from blockchain...
+                  Fetching transactions via WebSocket...
                 </p>
               </div>
             </TableCell>
           </TableRow>
-        ) : data.length > 0 ? (
-          data.map((swap: TokenTransaction) => {
+        ) : error ? (
+          <TableRow>
+            <TableCell
+              colSpan={6}
+              className="text-center py-8 text-autofun-text-secondary"
+            >
+              <div className="flex flex-col items-center gap-2">
+                <p>Error fetching transactions: {error}</p>
+                <button 
+                  onClick={() => refetch()} 
+                  className="text-autofun-text-highlight hover:underline flex items-center gap-1"
+                >
+                  Try again <RefreshCw className="size-4" />
+                </button>
+              </div>
+            </TableCell>
+          </TableRow>
+        ) : swaps.length > 0 ? (
+          swaps.map((swap: TokenTransaction) => {
             const isBuy = swap?.direction === 0;
             return (
               <TableRow className="hover:bg-white/5" key={swap?.txId}>
@@ -148,7 +169,7 @@ export default function SwapsTable({ token }: { token: IToken }) {
               className="text-center py-8 text-autofun-text-secondary"
             >
               <div className="flex flex-col items-center gap-2">
-                <p>No transaction data available from blockchain.</p>
+                <p>No transaction data available.</p>
                 <Link
                   to={`https://solscan.io/token/${token?.mint}#trades`}
                   target="_blank"

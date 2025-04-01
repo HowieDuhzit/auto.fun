@@ -7,13 +7,14 @@ import {
   TableRow,
 } from "@/components/ui/table-raw";
 import usePause from "@/hooks/use-pause";
+import { useTokenHolders } from "@/hooks/use-websocket-data";
 import { IToken } from "@/types";
 import { shortenAddress } from "@/utils";
-import { fetchTokenHolders, TokenHolder } from "@/utils/blockchain";
-import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 import PausedIndicator from "./paused-indicator";
+import React from "react";
 
 export default function HoldersTable({ token }: { token: IToken }) {
   const { paused, setPause } = usePause();
@@ -21,31 +22,43 @@ export default function HoldersTable({ token }: { token: IToken }) {
     `HoldersTable: Rendering for token ${token?.ticker} (${token?.mint})`,
   );
 
-  const query = useQuery({
-    queryKey: ["blockchain-holders", token?.mint],
-    queryFn: async () => {
-      console.log(
-        `HoldersTable: Fetching holders directly from blockchain for ${token?.mint}`,
-      );
-      try {
-        const result = await fetchTokenHolders(token?.mint);
-        console.log(
-          `HoldersTable: Retrieved ${result.total} holders from blockchain`,
-        );
-        return result;
-      } catch (error) {
-        console.error(`HoldersTable: Error fetching holders data:`, error);
-        return { holders: [], total: 0 };
-      }
-    },
-    enabled: !paused && token?.mint ? true : false,
-    refetchInterval: 30000, // Longer interval for blockchain queries to avoid rate limits
-    staleTime: 60000, // Data stays fresh for 1 minute
+  // Use the WebSocket hook instead of React Query
+  const { holders, total, loading, error, refetch } = useTokenHolders(token?.mint);
+  
+  console.log(`HoldersTable: RECEIVED DATA:`, {
+    holdersLength: holders?.length || 0,
+    holdersData: holders,
+    total,
+    loading,
+    error,
+    paused,
+    mint: token?.mint
   });
 
-  const isLoading = query.isLoading;
-  const data = query?.data?.holders || [];
-  // const totalHolders = query?.data?.total || 0;
+  // Only refetch when not paused
+  const intervalRef = React.useRef<NodeJS.Timeout | null>(null);
+  
+  React.useEffect(() => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    
+    // Only set up interval if not paused
+    if (!paused && token?.mint) {
+      intervalRef.current = setInterval(() => {
+        console.log(`HoldersTable: Auto-refreshing holders data for ${token?.mint}`);
+        refetch();
+      }, 30000); // 30 seconds interval
+    }
+    
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [paused, token?.mint, refetch]);
 
   return (
     <Table
@@ -63,19 +76,37 @@ export default function HoldersTable({ token }: { token: IToken }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {isLoading ? (
+        {loading ? (
           <TableRow>
             <TableCell colSpan={4} className="text-center py-8">
               <div className="flex flex-col items-center gap-2">
                 <RefreshCw className="animate-spin size-5 text-autofun-text-secondary" />
                 <p className="text-autofun-text-secondary">
-                  Fetching holders from blockchain...
+                  Fetching holders via WebSocket...
                 </p>
               </div>
             </TableCell>
           </TableRow>
-        ) : data.length > 0 ? (
-          data.map((holder: TokenHolder) => {
+        ) : error ? (
+          <TableRow>
+            <TableCell
+              colSpan={4}
+              className="text-center py-8 text-autofun-text-secondary"
+            >
+              <div className="flex flex-col items-center gap-2">
+                <p>Error fetching holders: {error}</p>
+                <button 
+                  onClick={() => refetch()} 
+                  className="text-autofun-text-highlight hover:underline flex items-center gap-1"
+                >
+                  Try again <RefreshCw className="size-4" />
+                </button>
+              </div>
+            </TableCell>
+          </TableRow>
+        ) : holders && holders.length > 0 ? (
+          holders.map((holder: any) => {
+            console.log('Rendering holder:', holder);
             return (
               <TableRow className="hover:bg-white/5" key={holder?.address}>
                 <TableCell className="text-left">
@@ -88,7 +119,7 @@ export default function HoldersTable({ token }: { token: IToken }) {
                   </Link>
                 </TableCell>
                 <TableCell className="text-right">
-                  {holder?.amount.toLocaleString()}
+                  {(holder?.amount || holder?.balance || 0).toLocaleString()}
                 </TableCell>
                 <TableCell className="text-right">
                   {holder?.percentage}%
@@ -111,7 +142,7 @@ export default function HoldersTable({ token }: { token: IToken }) {
               className="text-center py-8 text-autofun-text-secondary"
             >
               <div className="flex flex-col items-center gap-2">
-                <p>No holders data available from blockchain.</p>
+                <p>No holders data available.</p>
                 <Link
                   to={`https://solscan.io/token/${token?.mint}#holders`}
                   target="_blank"

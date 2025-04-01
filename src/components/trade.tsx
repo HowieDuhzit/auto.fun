@@ -9,11 +9,10 @@ import SkeletonImage from "./skeleton-image";
 import { useSwap } from "@/hooks/use-swap";
 import Loader from "./loader";
 import { useTokenBalance } from "@/hooks/use-token-balance";
-import { useQuery } from "@tanstack/react-query";
 import { useSolPriceContext } from "@/providers/use-sol-price-context";
-import { fetchTokenMarketMetrics } from "@/utils/blockchain";
 import { getSwapAmount } from "@/utils/swapUtils";
 import { useProgram } from "@/utils/program";
+import { useTokenMarketMetrics } from "@/hooks/use-websocket-data";
 
 export default function Trade({ token }: { token: IToken }) {
   const { solPrice: contextSolPrice } = useSolPriceContext();
@@ -22,28 +21,14 @@ export default function Trade({ token }: { token: IToken }) {
     undefined,
   );
 
-  // Fetch real-time blockchain metrics for this token
-  const metricsQuery = useQuery({
-    queryKey: ["blockchain-metrics", token?.mint],
-    queryFn: async () => {
-      if (!token?.mint) return null;
-      try {
-        console.log(`Trade: Fetching blockchain metrics for ${token.mint}`);
-        return await fetchTokenMarketMetrics(token.mint);
-      } catch (error) {
-        console.error(`Trade: Error fetching blockchain metrics:`, error);
-        return null;
-      }
-    },
-    enabled: !!token?.mint,
-    refetchInterval: 30_000, // Longer interval for blockchain queries
-    staleTime: 60000, // Data stays fresh for 1 minute
-  });
+  // Fetch real-time blockchain metrics for this token using WebSocket
+  const { metrics, loading: metricsLoading, error: metricsError, refetch: refetchMetrics } = useTokenMarketMetrics(token?.mint);
+
+  console.log(`Trade component: Using WebSocket for market metrics. Loading: ${metricsLoading}, Error: ${metricsError}`);
 
   const program = useProgram();
 
   // Use blockchain data if available, otherwise fall back to token data
-  const metrics = metricsQuery?.data;
   const solanaPrice =
     metrics?.solPriceUSD || contextSolPrice || token?.solPriceUSD || 0;
   const currentPrice = metrics?.currentPrice || token?.currentPrice || 0;
