@@ -69,6 +69,7 @@ function toSubscript(num: number): string {
     "7": "\u2087",
     "8": "\u2088",
     "9": "\u2089",
+    "-": "\u207B",
   };
   return num
     .toString()
@@ -85,8 +86,11 @@ export const formatNumberSubscript = (num: number): string => {
     num = Math.abs(num);
   }
 
-  // Round to 9 decimal places
-  num = Number(num.toFixed(10));
+  // Round to 10 decimal places (adjust precision as needed)
+  num = Number(num.toFixed(11));
+
+  // If rounding made the number zero, return "0"
+  if (num === 0) return "0";
 
   if (num >= 1) {
     return sign + num.toString();
@@ -101,9 +105,12 @@ export const formatNumberSubscript = (num: number): string => {
   if (totalZeros > 1) {
     return sign + "0.0" + toSubscript(totalZeros) + mantissaDigits;
   } else {
+    // At this point, totalZeros is 0 or 1
+    // "0".repeat(0) returns "" and "0".repeat(1) returns "0"
     return sign + "0." + "0".repeat(totalZeros) + mantissaDigits;
   }
 };
+
 
 export const sleep = (ms: number) => {
   return new Promise((resolve) => {

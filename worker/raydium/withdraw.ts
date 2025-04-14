@@ -6,7 +6,7 @@ import {
   PublicKey,
   Transaction,
 } from "@solana/web3.js";
-import { Autofun } from "../target/types/autofun";
+import { Autofun } from "../../program/target/types//autofun";
 import { logger } from "../logger";
 
 export const withdrawTx = async (

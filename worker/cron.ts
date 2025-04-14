@@ -2,7 +2,7 @@ import {
   ExecutionContext,
   ScheduledEvent,
 } from "@cloudflare/workers-types/experimental";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey, Keypair } from "@solana/web3.js";
 import { eq, sql } from "drizzle-orm";
 import { getLatestCandle } from "./chart";
 import { getDB, swaps, Token, tokens, vanityKeypairs } from "./db";
@@ -22,12 +22,19 @@ import bs58 from "bs58";
 import { TokenData, TokenDBData } from "../worker/raydium/types/tokenData";
 import { awardUserPoints, awardGraduationPoints } from "./points/helpers";
 import { getToken } from "./raydium/migration/migrations";
+import { TokenMigrator } from "./raydium/migration/migrateToken";
+import { Program, AnchorProvider } from "@coral-xyz/anchor";
+import { Wallet } from "./tokenSupplyHelpers/customWallet";
+import { RaydiumVault } from "../program/target/types/raydium_vault";
+import * as raydium_vault_IDL from "../program/target/idl/raydium_vault.json";
 
+import { Autofun } from "../program/target/types/autofun";
+import * as IDL from "../program/target/idl/autofun.json";
 // Store the last processed signature to avoid duplicate processing
 let lastProcessedSignature: string | null = null;
 
 function convertTokenDataToDBData(
-  tokenData: Partial<TokenData>,
+  tokenData: Partial<TokenData>
 ): Partial<TokenDBData> {
   const now = new Date().toISOString();
   return {
@@ -39,7 +46,7 @@ function convertTokenDataToDBData(
         : tokenData.migration,
     withdrawnAmounts:
       tokenData.withdrawnAmounts &&
-      typeof tokenData.withdrawnAmounts !== "string"
+        typeof tokenData.withdrawnAmounts !== "string"
         ? JSON.stringify(tokenData.withdrawnAmounts)
         : tokenData.withdrawnAmounts,
     poolInfo:
@@ -51,7 +58,7 @@ function convertTokenDataToDBData(
 
 export async function updateTokenInDB(
   env: Env,
-  tokenData: Partial<TokenData>,
+  tokenData: Partial<TokenData>
 ): Promise<Token> {
   try {
     const db = getDB(env);
@@ -139,7 +146,7 @@ export async function processTransactionLogs(
   env: Env,
   logs: string[],
   signature: string,
-  wsClient: any = null,
+  wsClient: any = null
 ): Promise<{ found: boolean; tokenAddress?: string; event?: string }> {
   try {
     // Get WebSocket client if not provided
@@ -160,7 +167,7 @@ export async function processTransactionLogs(
     const swapeventLog = logs.find((log) => log.includes("SwapEvent:"));
     const newTokenLog = logs.find((log) => log.includes("NewToken:"));
     const completeEventLog = logs.find((log) =>
-      log.includes("curve is completed"),
+      log.includes("curve is completed")
     );
 
     // Handle new token events
@@ -180,16 +187,16 @@ export async function processTransactionLogs(
         // Validate addresses are in proper base58 format
         const isValidTokenAddress =
           /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-            rawTokenAddress,
+            rawTokenAddress
           );
         const isValidCreatorAddress =
           /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-            rawCreatorAddress,
+            rawCreatorAddress
           );
 
         if (!isValidTokenAddress || !isValidCreatorAddress) {
           logger.error(
-            `Invalid address format in NewToken log: token=${rawTokenAddress}, creator=${rawCreatorAddress}`,
+            `Invalid address format in NewToken log: token=${rawTokenAddress}, creator=${rawCreatorAddress}`
           );
           return { found: false };
         }
@@ -201,7 +208,7 @@ export async function processTransactionLogs(
           signature,
           rawTokenAddress,
           rawCreatorAddress,
-          env,
+          env
         );
         await getDB(env)
           .insert(tokens)
@@ -212,7 +219,7 @@ export async function processTransactionLogs(
         } catch (error) {
           logger.error(
             "Failed to update holder cache on newToken event:",
-            error,
+            error
           );
         }
 
@@ -252,7 +259,7 @@ export async function processTransactionLogs(
           if (
             !mintAddress ||
             !/^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-              mintAddress,
+              mintAddress
             )
           ) {
             logger.error(`Invalid mint address format: ${mintAddress}`);
@@ -285,7 +292,7 @@ export async function processTransactionLogs(
           // Validate extracted data
           if (!user || !direction || !amount) {
             logger.error(
-              `Missing swap data: user=${user}, direction=${direction}, amount=${amount}`,
+              `Missing swap data: user=${user}, direction=${direction}, amount=${amount}`
             );
             return result;
           }
@@ -311,17 +318,17 @@ export async function processTransactionLogs(
 
           reserveToken = reservesParts[reservesParts.length - 2].replace(
             /[",)]/g,
-            "",
+            ""
           );
           reserveLamport = reservesParts[reservesParts.length - 1].replace(
             /[",)]/g,
-            "",
+            ""
           );
 
           // Validate extracted data
           if (!reserveToken || !reserveLamport) {
             logger.error(
-              `Missing reserves data: reserveToken=${reserveToken}, reserveLamport=${reserveLamport}`,
+              `Missing reserves data: reserveToken=${reserveToken}, reserveLamport=${reserveLamport}`
             );
             return result;
           }
@@ -329,7 +336,7 @@ export async function processTransactionLogs(
           // Make sure reserve values are numeric
           if (isNaN(Number(reserveToken)) || isNaN(Number(reserveLamport))) {
             logger.error(
-              `Invalid reserve values: reserveToken=${reserveToken}, reserveLamport=${reserveLamport}`,
+              `Invalid reserve values: reserveToken=${reserveToken}, reserveLamport=${reserveLamport}`
             );
             return result;
           }
@@ -370,7 +377,7 @@ export async function processTransactionLogs(
         const tokenWithMarketData = await calculateTokenMarketData(
           tokenWithSupply,
           solPrice,
-          env,
+          env
         );
         console.log("tokenWithMarketData", tokenWithMarketData);
 
@@ -388,11 +395,11 @@ export async function processTransactionLogs(
           price:
             direction === "1"
               ? Number(amountOut) /
-                Math.pow(10, SOL_DECIMALS) /
-                (Number(amount) / Math.pow(10, TOKEN_DECIMALS)) // Sell price (SOL/token)
+              Math.pow(10, SOL_DECIMALS) /
+              (Number(amount) / Math.pow(10, TOKEN_DECIMALS)) // Sell price (SOL/token)
               : Number(amount) /
-                Math.pow(10, SOL_DECIMALS) /
-                (Number(amountOut) / Math.pow(10, TOKEN_DECIMALS)), // Buy price (SOL/token),
+              Math.pow(10, SOL_DECIMALS) /
+              (Number(amountOut) / Math.pow(10, TOKEN_DECIMALS)), // Buy price (SOL/token),
           txId: signature,
           timestamp: new Date().toISOString(),
         };
@@ -401,7 +408,7 @@ export async function processTransactionLogs(
         const db = getDB(env);
         await db.insert(swaps).values(swapRecord);
         logger.log(
-          `Saved swap: ${direction === "0" ? "buy" : "sell"} for ${mintAddress}`,
+          `Saved swap: ${direction === "0" ? "buy" : "sell"} for ${mintAddress}`
         );
 
         // Update token data in database
@@ -414,7 +421,7 @@ export async function processTransactionLogs(
             liquidity:
               (Number(reserveLamport) / 1e9) * solPrice +
               (Number(reserveToken) / Math.pow(10, TOKEN_DECIMALS)) *
-                tokenPriceUSD,
+              tokenPriceUSD,
             marketCapUSD,
             tokenPriceUSD,
             solPriceUSD: solPrice,
@@ -424,13 +431,12 @@ export async function processTransactionLogs(
               100,
             txId: signature,
             lastUpdated: new Date().toISOString(),
-            volume24h: sql`COALESCE(${tokens.volume24h}, 0) + ${
-              direction === "1"
+            volume24h: sql`COALESCE(${tokens.volume24h}, 0) + ${direction === "1"
                 ? (Number(amount) / Math.pow(10, TOKEN_DECIMALS)) *
-                  tokenPriceUSD
+                tokenPriceUSD
                 : (Number(amountOut) / Math.pow(10, TOKEN_DECIMALS)) *
-                  tokenPriceUSD
-            }`,
+                tokenPriceUSD
+              }`,
           })
           .where(eq(tokens.mint, mintAddress))
           .returning();
@@ -440,9 +446,9 @@ export async function processTransactionLogs(
         const usdVolume =
           swapRecord.type === "buy"
             ? (swapRecord.amountOut / Math.pow(10, TOKEN_DECIMALS)) *
-              tokenPriceUSD
+            tokenPriceUSD
             : (swapRecord.amountIn / Math.pow(10, TOKEN_DECIMALS)) *
-              tokenPriceUSD;
+            tokenPriceUSD;
 
         const bondStatus =
           newToken?.status === "bonded" ? "postbond" : "prebond";
@@ -493,7 +499,7 @@ export async function processTransactionLogs(
         const latestCandle = await getLatestCandle(
           env,
           swapRecord.tokenMint,
-          swapRecord,
+          swapRecord
         );
 
         // Emit the new candle data
@@ -510,7 +516,7 @@ export async function processTransactionLogs(
           featuredScore: calculateFeaturedScore(
             newToken,
             maxVolume,
-            maxHolders,
+            maxHolders
           ),
         };
 
@@ -534,7 +540,7 @@ export async function processTransactionLogs(
           const mintParts = mintLog.split("Mint:");
           if (mintParts.length < 2) {
             logger.error(
-              `Invalid Mint log format in curve completion: ${mintLog}`,
+              `Invalid Mint log format in curve completion: ${mintLog}`
             );
             return result;
           }
@@ -544,17 +550,17 @@ export async function processTransactionLogs(
           if (
             !mintAddress ||
             !/^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-              mintAddress,
+              mintAddress
             )
           ) {
             logger.error(
-              `Invalid mint address format in curve completion: ${mintAddress}`,
+              `Invalid mint address format in curve completion: ${mintAddress}`
             );
             return result;
           }
         } catch (error) {
           logger.error(
-            `Error parsing mint address in curve completion: ${error}`,
+            `Error parsing mint address in curve completion: ${error}`
           );
           return result;
         }
@@ -573,6 +579,39 @@ export async function processTransactionLogs(
 
         // Update in database
         await updateTokenInDB(env, tokenData);
+        const connection = new Connection(
+          env.NETWORK === "devnet"
+            ? env.DEVNET_SOLANA_RPC_URL
+            : env.MAINNET_SOLANA_RPC_URL
+        );
+        const wallet = Keypair.fromSecretKey(
+          Uint8Array.from(JSON.parse(env.WALLET_PRIVATE_KEY))
+        );
+        const provider = new AnchorProvider(
+          connection,
+          new Wallet(wallet),
+          AnchorProvider.defaultOptions()
+        );
+        const program = new Program<RaydiumVault>(
+          raydium_vault_IDL as any,
+          provider
+        );
+        const autofunProgram = new Program<Autofun>(IDL as any, provider);
+
+        const tokenMigrator = new TokenMigrator(
+          env,
+          connection,
+          new Wallet(wallet),
+          program,
+          autofunProgram,
+          provider
+        );
+        const token = await getToken(env, mintAddress);
+        if (!token) {
+          logger.error(`Token not found in database: ${mintAddress}`);
+          return result;
+        }
+        tokenMigrator.migrateToken(token);
 
         // Notify clients
         await wsClient.emit(`token-${mintAddress}`, "updateToken", tokenData);
@@ -597,7 +636,7 @@ export async function processTransactionLogs(
 // Function to specifically check for a recently created token
 export async function monitorSpecificToken(
   env: Env,
-  tokenMint: string,
+  tokenMint: string
 ): Promise<{ found: boolean; message: string }> {
   logger.log(`Looking for specific token: ${tokenMint}`);
 
@@ -606,7 +645,7 @@ export async function monitorSpecificToken(
     const connection = new Connection(
       env.NETWORK === "devnet"
         ? env.DEVNET_SOLANA_RPC_URL
-        : env.MAINNET_SOLANA_RPC_URL,
+        : env.MAINNET_SOLANA_RPC_URL
     );
 
     // Validate programId first since we'll always need this
@@ -637,7 +676,7 @@ export async function monitorSpecificToken(
     let tokenSignatures: { signature: string }[] = [];
     const isValidBase58 =
       /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-        tokenMint,
+        tokenMint
       );
 
     if (isValidBase58) {
@@ -649,18 +688,18 @@ export async function monitorSpecificToken(
         tokenSignatures = await connection.getSignaturesForAddress(
           tokenPubkey,
           { limit: 5 },
-          "confirmed",
+          "confirmed"
         );
         logger.log(`Successfully queried signatures for token ${tokenMint}`);
       } catch (error) {
         logger.log(
-          `Could not get signatures for token ${tokenMint}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          `Could not get signatures for token ${tokenMint}: ${error instanceof Error ? error.message : "Unknown error"}`
         );
         logger.log(`Falling back to checking program signatures only`);
       }
     } else {
       logger.log(
-        `Token ${tokenMint} contains invalid base58 characters, skipping direct token lookup`,
+        `Token ${tokenMint} contains invalid base58 characters, skipping direct token lookup`
       );
     }
 
@@ -668,7 +707,7 @@ export async function monitorSpecificToken(
     const programSignatures = await connection.getSignaturesForAddress(
       programId,
       { limit: 20 }, // Check more program signatures
-      "confirmed",
+      "confirmed"
     );
     logger.log(`Found ${programSignatures.length} program signatures to check`);
 
@@ -681,7 +720,7 @@ export async function monitorSpecificToken(
       // Create a basic token record anyway since the user is requesting it
       try {
         logger.log(
-          `No signatures found, but creating basic token record for ${tokenMint}`,
+          `No signatures found, but creating basic token record for ${tokenMint}`
         );
 
         // Create a basic token record with all required fields
@@ -754,7 +793,7 @@ export async function monitorSpecificToken(
 
         if (relevantLogs.length > 0) {
           logger.log(
-            `Found ${relevantLogs.length} relevant logs for ${tokenMint} in tx ${signatureInfo.signature}`,
+            `Found ${relevantLogs.length} relevant logs for ${tokenMint} in tx ${signatureInfo.signature}`
           );
 
           try {
@@ -763,7 +802,7 @@ export async function monitorSpecificToken(
               env,
               logs,
               signatureInfo.signature,
-              wsClient,
+              wsClient
             );
 
             // Check exact match when tokenAddress is available, otherwise
@@ -771,7 +810,7 @@ export async function monitorSpecificToken(
             if (result.found) {
               if (result.tokenAddress === tokenMint) {
                 logger.log(
-                  `Successfully processed token ${tokenMint} from transaction ${signatureInfo.signature}`,
+                  `Successfully processed token ${tokenMint} from transaction ${signatureInfo.signature}`
                 );
                 return {
                   found: true,
@@ -779,21 +818,21 @@ export async function monitorSpecificToken(
                 };
               } else {
                 logger.log(
-                  `Found a token in transaction, but not the one we're looking for. Found ${result.tokenAddress} vs ${tokenMint}`,
+                  `Found a token in transaction, but not the one we're looking for. Found ${result.tokenAddress} vs ${tokenMint}`
                 );
               }
             }
           } catch (error) {
             logger.error(
               `Error processing logs for transaction ${signatureInfo.signature}:`,
-              error,
+              error
             );
           }
         }
       } catch (txError) {
         logger.error(
           `Error fetching transaction ${signatureInfo.signature}:`,
-          txError,
+          txError
         );
       }
     }
@@ -802,7 +841,7 @@ export async function monitorSpecificToken(
     // But we should still create a basic record for it
     try {
       logger.log(
-        `No matching transaction found, but creating basic token record for ${tokenMint}`,
+        `No matching transaction found, but creating basic token record for ${tokenMint}`
       );
 
       // Create a basic token record with all required fields
@@ -860,7 +899,7 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
     const connection = new Connection(
       env.NETWORK === "devnet"
         ? env.DEVNET_SOLANA_RPC_URL
-        : env.MAINNET_SOLANA_RPC_URL,
+        : env.MAINNET_SOLANA_RPC_URL
     );
 
     // Validate program ID is a proper base58 string before creating PublicKey
@@ -872,11 +911,11 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
     // Check if program ID is a valid base58 string
     const isValidBase58 =
       /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(
-        env.PROGRAM_ID,
+        env.PROGRAM_ID
       );
     if (!isValidBase58) {
       logger.error(
-        `Invalid PROGRAM_ID format: ${env.PROGRAM_ID} - contains non-base58 characters`,
+        `Invalid PROGRAM_ID format: ${env.PROGRAM_ID} - contains non-base58 characters`
       );
       return;
     }
@@ -887,7 +926,7 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
       programId = new PublicKey(env.PROGRAM_ID);
     } catch (error) {
       logger.error(
-        `Invalid PROGRAM_ID: ${env.PROGRAM_ID} - ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Invalid PROGRAM_ID: ${env.PROGRAM_ID} - ${error instanceof Error ? error.message : "Unknown error"}`
       );
       return;
     }
@@ -897,7 +936,7 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
       const signatures = await connection.getSignaturesForAddress(
         programId,
         { limit: 10 }, // Adjust limit as needed
-        "confirmed",
+        "confirmed"
       );
 
       // Process signatures from newest to oldest
@@ -926,12 +965,12 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
             env,
             logs,
             signatureInfo.signature,
-            wsClient,
+            wsClient
           );
         } catch (txError) {
           logger.error(
             `Error processing transaction ${signatureInfo.signature}:`,
-            txError,
+            txError
           );
           // Continue with next signature
         }
@@ -941,7 +980,7 @@ export async function monitorTokenEvents(env: Env): Promise<void> {
     } catch (sigError) {
       logger.error(
         `Error getting signatures for program ${env.PROGRAM_ID}:`,
-        sigError,
+        sigError
       );
     }
   } catch (error) {
@@ -977,7 +1016,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
     const usedCount = totalCount - currentCount;
 
     logger.log(
-      `[VANITY] Current stats: ${currentCount} unused out of ${totalCount} total keypairs (${usedCount} used)`,
+      `[VANITY] Current stats: ${currentCount} unused out of ${totalCount} total keypairs (${usedCount} used)`
     );
 
     // Determine the vanity service URL based on environment
@@ -994,18 +1033,18 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
       MAX_KEYPAIRS_PER_CRON_RUN,
       currentCount < MIN_VANITY_KEYPAIR_BUFFER
         ? TARGET_VANITY_KEYPAIR_BUFFER - currentCount
-        : 0,
+        : 0
     );
 
     if (keypairsToGenerate <= 0) {
       logger.log(
-        `[VANITY] Buffer full (${currentCount}/${MIN_VANITY_KEYPAIR_BUFFER}). Not generating any keypairs.`,
+        `[VANITY] Buffer full (${currentCount}/${MIN_VANITY_KEYPAIR_BUFFER}). Not generating any keypairs.`
       );
       return;
     }
 
     logger.log(
-      `[VANITY] Will generate ${keypairsToGenerate} keypairs this run`,
+      `[VANITY] Will generate ${keypairsToGenerate} keypairs this run`
     );
 
     let successfullyGenerated = 0;
@@ -1017,7 +1056,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
     async function generateAndSaveKeypair(index: number): Promise<boolean> {
       try {
         logger.log(
-          `[VANITY] Requesting keypair ${index + 1}/${keypairsToGenerate}...`,
+          `[VANITY] Requesting keypair ${index + 1}/${keypairsToGenerate}...`
         );
 
         // Request a single keypair from the vanity service
@@ -1036,7 +1075,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
         if (!response.ok) {
           const errorText = await response.text();
           logger.error(
-            `[VANITY] Vanity service error ${response.status}: ${errorText}`,
+            `[VANITY] Vanity service error ${response.status}: ${errorText}`
           );
           return false;
         }
@@ -1046,14 +1085,14 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
         // Validate the keypair data
         if (!result.pubkey || !result.private_key) {
           logger.error(
-            `[VANITY] Invalid keypair format: ${JSON.stringify(result)}`,
+            `[VANITY] Invalid keypair format: ${JSON.stringify(result)}`
           );
           return false;
         }
 
         // Log success
         logger.log(
-          `[VANITY] Generated keypair ending with "${VANITY_SUFFIX}" in ${result.attempts || "unknown"} attempts: ${result.pubkey}`,
+          `[VANITY] Generated keypair ending with "${VANITY_SUFFIX}" in ${result.attempts || "unknown"} attempts: ${result.pubkey}`
         );
 
         // Check if this keypair is already in the database before proceeding
@@ -1065,7 +1104,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
 
         if (existingCheck && existingCheck.length > 0) {
           logger.warn(
-            `[VANITY] Keypair ${result.pubkey} already exists in database, skipping`,
+            `[VANITY] Keypair ${result.pubkey} already exists in database, skipping`
           );
           return false;
         }
@@ -1076,7 +1115,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
         // Verify the private key is exactly 64 bytes (required by Solana)
         if (privateKeyBytes.length !== 64) {
           logger.error(
-            `[VANITY] Invalid private key length: ${privateKeyBytes.length} bytes (expected 64 bytes)`,
+            `[VANITY] Invalid private key length: ${privateKeyBytes.length} bytes (expected 64 bytes)`
           );
           return false;
         }
@@ -1095,16 +1134,16 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
           // Verify the public key matches what the vanity service returned
           if (recreatedPubkey !== result.pubkey) {
             logger.error(
-              `[VANITY] Keypair verification failed: public key mismatch`,
+              `[VANITY] Keypair verification failed: public key mismatch`
             );
             logger.error(
-              `[VANITY] Expected: ${result.pubkey}, Got: ${recreatedPubkey}`,
+              `[VANITY] Expected: ${result.pubkey}, Got: ${recreatedPubkey}`
             );
             return false;
           }
 
           logger.log(
-            `[VANITY] Keypair verification successful: ${result.pubkey}`,
+            `[VANITY] Keypair verification successful: ${result.pubkey}`
           );
         } catch (verifyError) {
           logger.error(`[VANITY] Keypair verification failed: ${verifyError}`);
@@ -1129,20 +1168,20 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
 
           // Log successful insert
           logger.log(
-            `[VANITY] ✓ SAVED KEYPAIR DIRECTLY TO DATABASE: ${result.pubkey}`,
+            `[VANITY] ✓ SAVED KEYPAIR DIRECTLY TO DATABASE: ${result.pubkey}`
           );
           return true;
         } catch (insertError) {
           logger.error(
             `[VANITY] ✘ ERROR SAVING KEYPAIR: ${result.pubkey}`,
-            insertError,
+            insertError
           );
           return false;
         }
       } catch (error) {
         logger.error(
           `[VANITY] Error in generateAndSaveKeypair for index ${index}:`,
-          error,
+          error
         );
         return false;
       }
@@ -1162,7 +1201,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
               // Only log once after we've completed a successful generation
               generatedCount++;
               logger.log(
-                `[VANITY] Progress: ${generatedCount}/${keypairsToGenerate} keypairs generated (${Math.round((generatedCount / keypairsToGenerate) * 100)}%)`,
+                `[VANITY] Progress: ${generatedCount}/${keypairsToGenerate} keypairs generated (${Math.round((generatedCount / keypairsToGenerate) * 100)}%)`
               );
             }
             return success;
@@ -1170,7 +1209,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
             logger.error(`[VANITY] Error in keypair task ${i}:`, error);
             return false;
           }
-        })(),
+        })()
       );
 
       // Process in batches to limit concurrency
@@ -1187,7 +1226,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
 
         // Log the progress after each batch
         logger.log(
-          `[VANITY] Batch complete: ${successfullyGenerated}/${keypairsToGenerate} keypairs generated so far`,
+          `[VANITY] Batch complete: ${successfullyGenerated}/${keypairsToGenerate} keypairs generated so far`
         );
 
         // Do a database check after each batch to verify
@@ -1198,14 +1237,14 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
 
         const currentDbCount = dbCheckCount[0]?.count || 0;
         logger.log(
-          `[VANITY] Database verification: ${currentDbCount} unused keypairs now in database`,
+          `[VANITY] Database verification: ${currentDbCount} unused keypairs now in database`
         );
       }
     }
 
     const totalTime = (Date.now() - startTime) / 1000;
     logger.log(
-      `[VANITY] Completed generation of ${successfullyGenerated}/${keypairsToGenerate} keypairs in ${totalTime.toFixed(1)}s`,
+      `[VANITY] Completed generation of ${successfullyGenerated}/${keypairsToGenerate} keypairs in ${totalTime.toFixed(1)}s`
     );
 
     // Get updated counts
@@ -1215,7 +1254,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
       .where(eq(vanityKeypairs.used, 0));
 
     logger.log(
-      `[VANITY] Final buffer status: ${updatedCount[0]?.count || 0}/${MIN_VANITY_KEYPAIR_BUFFER} unused keypairs`,
+      `[VANITY] Final buffer status: ${updatedCount[0]?.count || 0}/${MIN_VANITY_KEYPAIR_BUFFER} unused keypairs`
     );
   } catch (error) {
     logger.error("[VANITY] Error managing vanity keypairs:", error);
@@ -1225,7 +1264,7 @@ export async function manageVanityKeypairs(env: Env): Promise<void> {
 
 export async function cron(
   env: Env,
-  ctx: ExecutionContext | { cron: string },
+  ctx: ExecutionContext | { cron: string }
 ): Promise<void> {
   console.log("Running cron job...");
   try {
@@ -1260,13 +1299,13 @@ export async function cron(
               logger.log(`Updating holder data for token: ${token.mint}`);
               const holderCount = await updateHoldersCache(env, token.mint);
               logger.log(
-                `Updated holders for ${token.mint}: ${holderCount} holders`,
+                `Updated holders for ${token.mint}: ${holderCount} holders`
               );
             }
           } catch (err) {
             logger.error(
               `Error updating holders for token ${token.mint}:`,
-              err,
+              err
             );
           }
         }

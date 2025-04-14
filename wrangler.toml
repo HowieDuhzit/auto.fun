@@ -44,7 +44,7 @@ NODE_ENV = "production"
 MAINNET_FRONTEND_URL="https://autofun.pages.dev"
 DEVNET_FRONTEND_URL="https://develop.autofun.pages.dev"
 AUTH_TOKEN_SALT = "autofun-wallet-auth-salt-replace-in-production" # Salt for hashing auth tokens
-
+cpu_ms = 300_000 # CPU time limit for the worker (300ms)
 # Socket.io Durable Objects
 [durable_objects]
 bindings = [
