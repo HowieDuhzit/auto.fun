@@ -2138,9 +2138,6 @@ export const Create = () => {
           //   );
           // }
 
-          // Show coin drop animation
-          setShowCoinDrop(true);
-
           // Get auth token from localStorage with quote handling
           const authToken = getAuthToken();
 
@@ -2179,8 +2176,13 @@ export const Create = () => {
             const errorData = (await createResponse.json()) as {
               error?: string;
             };
+            // show modal with error
+            toast.error(errorData.error || "Failed to create token entry");
             throw new Error(errorData.error || "Failed to create token entry");
           }
+
+          // Show coin drop animation
+          setShowCoinDrop(true);
 
           // Clear imported token data from localStorage
           localStorage.removeItem("import_token_data");

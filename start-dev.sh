@@ -44,8 +44,8 @@ fi
 echo "Creating .env.local with required environment variables..."
 cat > .env.local << 'EOF'
 # Client environment variables
-VITE_API_URL=http://localhost:8787
-VITE_DEV_API_URL=http://localhost:8787
+# VITE_API_URL=http://localhost:8787
+# VITE_DEV_API_URL=http://localhost:8787
 EOF
 
 # Finally, run the dev command
