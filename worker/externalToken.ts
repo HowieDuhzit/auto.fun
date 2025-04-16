@@ -52,7 +52,10 @@ export class ExternalToken {
       throw new Error("missing CODEX_WEBHOOK_AUTH_TOKEN env var");
     }
 
-    console.log("`${this.env.VITE_API_URL}/api/codex-webhook`", `${this.env.VITE_API_URL}/api/codex-webhook`)
+    console.log(
+      "`${this.env.VITE_API_URL}/api/codex-webhook`",
+      `${this.env.VITE_API_URL}/api/codex-webhook`,
+    );
 
     try {
       await this.sdk.mutations.createWebhooks({
