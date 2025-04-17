@@ -145,6 +145,7 @@ export const users = sqliteTable("users", {
   name: text("name"),
   address: text("address").notNull().unique(),
   points: integer("points").notNull().default(0),
+  banned: integer("banned").default(0),
   rewardPoints: integer("reward_points").notNull().default(0),
   createdAt: text("created_at", { mode: "text" }).notNull(),
 });
