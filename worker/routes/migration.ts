@@ -88,7 +88,7 @@ migrationRouter.post("/migration/resume", async (c) => {
 });
 
 // claim endpoint
-migrationRouter.post("/claimFees", async (c) => {
+migrationRouter.post("/claim-fees", async (c) => {
   try {
     const user = c.get("user");
 
@@ -176,7 +176,7 @@ migrationRouter.post("/claimFees", async (c) => {
 });
 
 // checkBalance endpoint
-migrationRouter.get("/checkBalance", async (c) => {
+migrationRouter.get("/check-balance", async (c) => {
   try {
     const user = c.get("user");
     const tokenMint = c.req.query("tokenMint");
