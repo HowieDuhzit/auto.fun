@@ -409,7 +409,9 @@ export default function Page() {
             )}
           </div>
           {token?.creator === normalizedWallet && !token?.imported && (
-             <div className="place-self-center">claim fees</div>
+             <div className="place-self-center">
+              <button className="p-4 border-2 border-autofun-background-action-highlight">Claim Fees</button>
+             </div>
             )}
         </div>
 
