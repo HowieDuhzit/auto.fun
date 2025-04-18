@@ -408,6 +408,9 @@ export default function Page() {
               <AdminSection />
             )}
           </div>
+          {token?.creator === normalizedWallet && !token?.imported && (
+             <div className="place-self-center">claim fees</div>
+            )}
         </div>
 
         {/* Middle Column - 50% - Tabs for Chart and AI Create */}
