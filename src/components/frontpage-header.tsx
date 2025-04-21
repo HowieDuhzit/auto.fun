@@ -184,6 +184,7 @@ const DiceRoller = ({ tokens = [] }: DiceRollerProps) => {
     left: string;
     top: string;
   } | null>(null);
+  const [isAnimating, setIsAnimating] = useState<boolean>(false)
 
   // Store selected tokens and their addresses for navigation
   const [selectedTokens, setSelectedTokens] = useState<
@@ -358,6 +359,7 @@ const DiceRoller = ({ tokens = [] }: DiceRollerProps) => {
       }
       setSelectedCube(null);
       setSelectedTokenData(null);
+      setIsAnimating(true)
     } else {
       // Only apply force if no cube is selected
       applyForceToAllDice(event.nativeEvent);
@@ -884,29 +886,45 @@ const DiceRoller = ({ tokens = [] }: DiceRollerProps) => {
 
     // Add collision event listener to world (use collide event instead of beginContact)
     world.addEventListener("collide", handleCollisions);
-
-    // Animation function
     function animate() {
       requestAnimationFrame(animate);
-
-      // Step the physics world
-      world.step(1 / 60);
-
-      // Update dice positions and rotations
-      for (let i = 0; i < diceBodies.length; i++) {
-        const dieBody = diceBodies[i];
-        const die = dice[i];
-
-        die.position.copy(dieBody.position as any);
-        die.quaternion.copy(dieBody.quaternion as any);
+    
+      if (!isAnimating) {
+        world.step(1 / 60);
+    
+        let anyMoving = false;
+    
+        for (let i = 0; i < diceBodies.length; i++) {
+          const dieBody = diceBodies[i];
+          const die = dice[i];
+    
+          // Check if the die is still moving
+          const isMoving =
+            dieBody.velocity.lengthSquared() > 0.01 ||
+            dieBody.angularVelocity.lengthSquared() > 0.01;
+    
+          if (isMoving) {
+            anyMoving = true;
+    
+            die.position.copy(dieBody.position as any);
+            die.quaternion.copy(dieBody.quaternion as any);
+          }
+        }
+    
+        if (!anyMoving) {
+          // All dice have stopped moving — stop animation
+          setIsAnimating(false)
+          console.log("All dice settled. Stopping animation.");
+        }
       }
 
       renderer.render(scene, camera);
     }
-
-    // Start animation
-    animate();
-
+    
+  
+      animate(); 
+    
+    
     // Expose reset function to window so the button can access it
     window.resetDice = throwDice;
 
