@@ -594,6 +594,8 @@ export async function updateTokens(env: Env) {
           const batch = activeTokens.slice(i, i + CHUNK_SIZE) as Token[];
           const updatedBatch = await bulkUpdatePartialTokens(batch, env);
           logger.log(`Cron: Updated prices for batch ${Math.floor(i/CHUNK_SIZE)+1} (${updatedBatch.length}/${batch.length}) tokens`);
+          // throttle between batches
+          await new Promise((res) => setTimeout(res, 200));
         }
         logger.log(`Cron: Completed price updates for ${total} tokens in batches of ${CHUNK_SIZE}`);
       } catch (err) {
