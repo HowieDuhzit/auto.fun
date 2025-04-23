@@ -20,6 +20,7 @@ const requireAdmin = async (c: any, next: Function) => {
   }
 
   const isAdmin = adminAddresses.includes(user.publicKey);
+
   if (!isAdmin) {
     return c.json({ error: "Admin privileges required" }, 403);
   }

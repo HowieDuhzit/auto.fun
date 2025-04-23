@@ -24,7 +24,7 @@ export default function AdminTokens() {
 
 function AdminTokensList() {
   const [sortBy, setSortBy] = useState<keyof IToken | "all" | "oldest">(
-    "createdAt",
+    "createdAt"
   );
   const [hideImported, setHideImported] = useState(false);
   const queryClient = useQueryClient(); // Get query client instance
@@ -54,7 +54,7 @@ function AdminTokensList() {
     mutationFn: async (tokenAddress: string) => {
       // Find the token in the current list to determine the current hidden status
       const token = tokensPagination?.items?.find(
-        (t) => t.mint === tokenAddress,
+        (t) => t.mint === tokenAddress
       );
       const currentHiddenStatus = token ? !!(token as any).hidden : false;
       return await fetcher(`/api/admin/tokens/${tokenAddress}/hidden`, "POST", {
@@ -63,18 +63,17 @@ function AdminTokensList() {
     },
     onSuccess: (_, tokenAddress) => {
       const token = tokensPagination?.items?.find(
-        (t) => t.mint === tokenAddress,
+        (t) => t.mint === tokenAddress
       );
       const currentHiddenStatus = token ? !!(token as any).hidden : false; // Ensure boolean
       toast.success(
-        `Token ${currentHiddenStatus ? "unhidden" : "hidden"} successfully`,
+        `Token ${currentHiddenStatus ? "unhidden" : "hidden"} successfully`
       );
-      // Invalidate the tokens query to refetch the list
-      queryClient.invalidateQueries({ queryKey: ["tokens", sortBy] });
+      tokensPagination.query.refetch();
     },
     onError: (error, tokenAddress) => {
       toast.error(
-        `Failed to update hidden status for token ${tokenAddress}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to update hidden status for token ${tokenAddress}: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     },
   });
@@ -136,14 +135,9 @@ function AdminTokensList() {
                   <div className="flex items-center space-x-2">
                     {token.image && (
                       <img
-                        src={token.image}
+                        src={token?.image || "/placeholder.png"}
                         alt={token.name}
                         className="w-6 h-6 rounded-full object-cover"
-                        onError={(e) => {
-                          // Replace broken images with a placeholder
-                          (e.target as HTMLImageElement).src =
-                            "/placeholder.png";
-                        }}
                       />
                     )}
                     <span>{token.name}</span>
@@ -301,7 +295,7 @@ function AdminTokenDetails({ address }: { address: string }) {
       return await fetcher(
         `/api/admin/tokens/${address}/social`,
         "POST",
-        links,
+        links
       );
     },
     onSuccess: () => {
@@ -310,7 +304,7 @@ function AdminTokenDetails({ address }: { address: string }) {
     },
     onError: (error) => {
       toast.error(
-        `Failed to update social links: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to update social links: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     },
   });
@@ -324,13 +318,13 @@ function AdminTokenDetails({ address }: { address: string }) {
     },
     onSuccess: () => {
       toast.success(
-        `Token ${tokenQuery.data?.featured ? "removed from" : "added to"} featured tokens`,
+        `Token ${tokenQuery.data?.featured ? "removed from" : "added to"} featured tokens`
       );
       tokenQuery.refetch(); // Refetch token data after update
     },
     onError: (error) => {
       toast.error(
-        `Failed to update featured status: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to update featured status: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     },
   });
@@ -344,13 +338,13 @@ function AdminTokenDetails({ address }: { address: string }) {
     },
     onSuccess: () => {
       toast.success(
-        `Token ${tokenQuery.data?.verified ? "unverified" : "verified"} successfully`,
+        `Token ${tokenQuery.data?.verified ? "unverified" : "verified"} successfully`
       );
       tokenQuery.refetch(); // Refetch token data after update
     },
     onError: (error) => {
       toast.error(
-        `Failed to update verified status: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to update verified status: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     },
   });
@@ -364,13 +358,13 @@ function AdminTokenDetails({ address }: { address: string }) {
     },
     onSuccess: () => {
       toast.success(
-        `Token ${tokenQuery.data?.hidden ? "unhidden" : "hidden"} successfully`,
+        `Token ${tokenQuery.data?.hidden ? "unhidden" : "hidden"} successfully`
       );
       tokenQuery.refetch(); // Refetch token data after update
     },
     onError: (error) => {
       toast.error(
-        `Failed to update hidden status: ${error instanceof Error ? error.message : "Unknown error"}`,
+        `Failed to update hidden status: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     },
   });

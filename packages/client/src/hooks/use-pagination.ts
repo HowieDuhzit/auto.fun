@@ -279,6 +279,7 @@ export const usePagination = <TOutput extends Record<string, unknown>, TInput>({
     nextPage,
     previousPage,
     goToPage,
+    query
   };
 };
 
