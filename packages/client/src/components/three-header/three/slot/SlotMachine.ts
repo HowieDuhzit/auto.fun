@@ -14,6 +14,8 @@ export default class SlotMachine {
     private readonly straighteningThreshold: number = 0.1; // Speed below which straightening starts
     private readonly straighteningLerpFactor: number = 0.1;
     private readonly snapThreshold: number = 0.005;
+    private readonly staggerDelay: number = 200; // Delay in ms between each slot starting
+    private readonly initialSpinSpeed: number = 0.7;
 
     constructor(headerTokens: IToken[], slotSize: number = 1.2, position: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
         const textureLoader = new THREE.TextureLoader();
@@ -65,13 +67,21 @@ export default class SlotMachine {
     }
 
     startAnimation(): void {
-        this.animationSpeed = 0.7;
+        this.animationSpeed = this.initialSpinSpeed;
         this.straighteningPhase = false;
         this.straighteningTargets = [];
-        for (const slot of this.slots) {
-            slot.setAnimationSpeed(this.animationSpeed);
-            slot.startAnimation();
-        }
+
+        this.slots.forEach((slot, index) => {
+            const delay = index * this.staggerDelay;
+
+            setTimeout(() => {
+                if (!this.straighteningPhase) {
+                    slot.setAnimationSpeed(this.animationSpeed);
+                    slot.startAnimation();
+                }
+            }, delay);
+        });
+
     }
 
     isAnimating(): boolean {
@@ -79,42 +89,65 @@ export default class SlotMachine {
     }
 
     update(mousePosition: THREE.Vector3): void {
-        if (this.animationSpeed === 0 && !this.straighteningPhase) {
-            return;
+        if (this.animationSpeed === 0 && !this.straighteningPhase && this.slots.every(slot => !slot.Animating())) {
+             this.isFirstRender = true;
+             return;
         }
 
         if (!this.straighteningPhase) {
-            const decayRate = 0.005;
-            this.animationSpeed *= (1 - decayRate);
 
-            for (const slot of this.slots) {
-                slot.setAnimationSpeed(this.animationSpeed);
-                slot.update(mousePosition);
+            if (this.animationSpeed > 0) {
+                const decayRate = 0.005;
+                this.animationSpeed *= (1 - decayRate);
+
+                for (const slot of this.slots) {
+                    if (slot.Animating()) {
+                        slot.setAnimationSpeed(this.animationSpeed);
+                    }
+                    slot.update(mousePosition);
+                }
+
+                if (this.animationSpeed < this.straighteningThreshold) {
+                     this.startStraighteningPhase();
+                }
+            } else {
+                 for (const slot of this.slots) {
+                     slot.update(mousePosition);
+                 }
+
+                 if (!this.straighteningPhase) {
+                    this.startStraighteningPhase();
+                 }
             }
 
-            if (this.animationSpeed < this.straighteningThreshold) {
-                this.startStraighteningPhase();
-            }
+
         }
         else {
             let allSlotsStraight = true;
 
             for (let i = 0; i < this.slots.length; i++) {
                 const slot = this.slots[i];
+                slot.setAnimationSpeed(0);
+
                 const targetRotationX = this.straighteningTargets[i];
                 const currentRotation = slot.getRotation();
 
                 let diffX = targetRotationX - currentRotation.x;
-
                 while (diffX < -Math.PI) diffX += 2 * Math.PI;
                 while (diffX > Math.PI) diffX -= 2 * Math.PI;
 
                 if (Math.abs(diffX) < this.snapThreshold) {
                     slot.setRotation(new THREE.Euler(targetRotationX, currentRotation.y, currentRotation.z));
+                    if(slot.Animating()) {
+                        slot.stopAnimation();
+                    }
                 } else {
                     allSlotsStraight = false;
                     const newRotationX = currentRotation.x + diffX * this.straighteningLerpFactor;
                     slot.setRotation(new THREE.Euler(newRotationX, currentRotation.y, currentRotation.z));
+                    if(!slot.Animating()) {
+                        slot.startAnimation();
+                    }
                 }
             }
 
@@ -122,7 +155,7 @@ export default class SlotMachine {
                 this.straighteningPhase = false;
                 this.straighteningTargets = [];
                  for (const slot of this.slots) {
-                    slot.stopAnimation();
+                    if(slot.Animating()) slot.stopAnimation();
                  }
             }
         }

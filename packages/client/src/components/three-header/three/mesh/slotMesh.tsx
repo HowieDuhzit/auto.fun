@@ -47,6 +47,10 @@ export class SlotMesh extends AutoMesh {
         this.animationSpeed = speed;
     }
 
+    getAnimationSpeed(): number {
+        return this.animationSpeed;
+    }
+
     setRotation(rotation: THREE.Euler): void {
         this.mesh.rotation.copy(rotation);
     }
