@@ -1,3 +1,4 @@
+import { IToken } from "@/types";
 import { SlotMesh } from "../mesh/slotMesh";
 import * as THREE from "three";
 
@@ -14,11 +15,39 @@ export default class SlotMachine {
     private readonly straighteningLerpFactor: number = 0.1;
     private readonly snapThreshold: number = 0.005;
 
-    constructor(slotSize: number = 1.2, position: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
+    constructor(headerTokens: IToken[], slotSize: number = 1.2, position: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
+        const textureLoader = new THREE.TextureLoader();
         this.position = position;
-        this.slotSizes = slotSize + this.slotGap; // Adjust slot size to include gap
+        this.slotSizes = slotSize;
+        const totalWidthPerSlot = this.slotSizes + this.slotGap; // Calculate total space including gap
+
+        if (headerTokens.length === 0) {
+            console.warn("SlotMachine constructor called with empty headerTokens array.");
+            return;
+        }
+
         for (let i = 0; i < 3; i++) {
-            const slotMesh = new SlotMesh(this.slotSizes, new THREE.Color(0x000000), new THREE.Vector3(this.position.x + (i * this.slotSizes + i * this.slotGap), this.position.y, this.position.z));
+            const materials: THREE.Material[] = [];
+            for (let faceIndex = 0; faceIndex < 6; faceIndex++) {
+                const randomIndex = Math.floor(Math.random() * headerTokens.length);
+                const randomTokenImageUrl = headerTokens[randomIndex]?.image;
+
+                if (randomTokenImageUrl) {
+                    const texture = textureLoader.load(randomTokenImageUrl, (tex) => {
+                        tex.colorSpace = THREE.SRGBColorSpace;
+                        tex.needsUpdate = true;
+                    });
+                    materials.push(new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }));
+                } else {
+                    console.warn(`Missing image URL for token at random index ${randomIndex}. Using fallback color.`);
+                    materials.push(new THREE.MeshBasicMaterial({ color: 0xcccccc, side: THREE.DoubleSide }));
+                }
+            }
+
+            const slotPositionX = this.position.x + i * totalWidthPerSlot;
+            const slotPosition = new THREE.Vector3(slotPositionX, this.position.y, this.position.z);
+
+            const slotMesh = new SlotMesh(this.slotSizes, materials, slotPosition);
             this.slots.push(slotMesh);
         }
     }

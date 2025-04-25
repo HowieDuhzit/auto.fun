@@ -165,7 +165,7 @@ export default function Page() {
         {/* Show FrontpageHeader on desktop, logo on mobile */}
         {!isMobile ? (
           // <FrontpageHeader tokens={headerTokens} />
-          <ThreeHeader/>
+          <ThreeHeader headerTokens={headerTokens}/>
         ) : (
           <div className="flex justify-center items-center py-8">
             <img

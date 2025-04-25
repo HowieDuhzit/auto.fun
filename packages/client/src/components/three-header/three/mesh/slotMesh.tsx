@@ -8,20 +8,9 @@ export class SlotMesh extends AutoMesh {
     private animationSpeed: number = 0;
     private texture: THREE.Texture | null = null;
 
-    constructor(slotSize: number, color: THREE.ColorRepresentation, initialPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
-        const geometry = new THREE.BoxGeometry(slotSize, slotSize, slotSize, 4 ,4 ,4)
-
-        const textureLoader = new THREE.TextureLoader();
-        const texture = textureLoader.load('/logo.png', (texture) => {
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(1, 1);
-            texture.needsUpdate = true;
-        });
-
-        const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, map: texture });
-
-        super(geometry, material, initialPosition);
+    constructor(slotSize: number, materials: THREE.Material[], initialPosition: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
+        const geometry = new THREE.BoxGeometry(slotSize, slotSize, slotSize, 4 ,4 ,4);
+        super(geometry, materials, initialPosition);
         this.initialPosition = initialPosition.clone();
     }
 

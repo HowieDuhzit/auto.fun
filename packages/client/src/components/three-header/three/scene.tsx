@@ -122,6 +122,8 @@ class ThreeScene {
       for (const slot of slotMachine.getSlots()) {
           this.scene.add(slot.getMesh());
       }
+
+      slotMachine.startAnimation();
   }
 
   setSize(width: number, height: number): void {
@@ -164,6 +166,17 @@ class ThreeScene {
 
     if (shouldUpdate) {
       this.render();
+    }
+  }
+
+  removeSlotMachine(slotMachine: SlotMachine): void {
+    const index = this.slotMachines.indexOf(slotMachine);
+    if (index !== -1) {
+      this.slotMachines.splice(index, 1);
+      for (const slot of slotMachine.getSlots()) {
+        this.scene.remove(slot.getMesh());
+        slot.dispose();
+      }
     }
   }
 
