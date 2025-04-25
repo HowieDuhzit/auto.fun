@@ -4,6 +4,7 @@ export abstract class AutoMesh {
     protected geometry: THREE.BufferGeometry;
     protected material: THREE.Material | THREE.Material[];
     protected mesh: THREE.Mesh;
+    protected firstRender: boolean = true;
 
     constructor(geometry: THREE.BufferGeometry, material: THREE.Material | THREE.Material[], position: THREE.Vector3 = new THREE.Vector3(0, 0, 0)) {
         this.geometry = geometry;

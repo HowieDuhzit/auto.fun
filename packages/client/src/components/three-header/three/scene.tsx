@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { AutoMesh } from './mesh/automesh';
+import { EyeMesh } from './mesh/eyeMesh';
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   if (Array.isArray(material)) {
@@ -27,6 +28,7 @@ class ThreeScene {
   private camera: THREE.OrthographicCamera;
   private renderer: THREE.WebGLRenderer;
   private autoMeshes: AutoMesh[] = [];
+  private eyeMeshes: EyeMesh[] = [];
   private animationFrameId: number | null = null;
 
   private mousePosition: THREE.Vector2 = new THREE.Vector2();
@@ -108,6 +110,11 @@ class ThreeScene {
       this.scene.add(autoMesh.getMesh());
   }
 
+  public addEyeMesh(eyeMesh: EyeMesh): void {
+      this.eyeMeshes.push(eyeMesh);
+      this.scene.add(eyeMesh.getMesh());
+  }
+
   setSize(width: number, height: number): void {
     const aspect = width / height;
     const viewSize = 5; 
@@ -128,18 +135,24 @@ class ThreeScene {
 
   private animate(): void {
     this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+    let shouldUpdate = false;
 
-    for (const autoMesh of this.autoMeshes) {
-        autoMesh.update(this.mouseWorldPosition);
+    for (const eyeMesh of this.eyeMeshes) {
+      if (eyeMesh.shouldUpdate(this.mouseWorldPosition)) {
+        eyeMesh.update(this.mouseWorldPosition);
+        shouldUpdate = true;
+      }
     }
 
-    this.render();
+    if (shouldUpdate) {
+      this.render();
+    }
   }
 
   dispose(): void {
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = null; // Reset the ID
+      this.animationFrameId = null;
     }
 
     window.removeEventListener('mousemove', this.onMouseMove.bind(this), false);

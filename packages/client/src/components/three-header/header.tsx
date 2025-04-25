@@ -25,8 +25,8 @@ export default function ThreeHeader() {
             const eyeMesh1 = new EyeMesh(eyeSize, new THREE.Color(0x000000), followRadius, worldPosition1);
             const eyeMesh2 = new EyeMesh(eyeSize, new THREE.Color(0x000000), followRadius, worldPosition2);
 
-            threeSceneRef.current.addAutoMesh(eyeMesh1);
-            threeSceneRef.current.addAutoMesh(eyeMesh2);
+            threeSceneRef.current.addEyeMesh(eyeMesh1);
+            threeSceneRef.current.addEyeMesh(eyeMesh2);
 
             threeScene.setInteractionPlaneZ(worldPosition1.z);
 
