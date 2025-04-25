@@ -17,6 +17,7 @@ import { Fragment } from "react/jsx-runtime";
 import { FilterIcon, X } from "lucide-react"; // Example icons
 import { useUrlSearchParams } from "@/hooks/use-url-searchparams";
 import { Helmet } from "react-helmet";
+import ThreeHeader from "@/components/three-header/header";
 
 // Define types for state
 type GridSortByType = "newest" | "all" | "marketCap";
@@ -163,7 +164,8 @@ export default function Page() {
         {/* Header Section */}
         {/* Show FrontpageHeader on desktop, logo on mobile */}
         {!isMobile ? (
-          <FrontpageHeader tokens={headerTokens} />
+          // <FrontpageHeader tokens={headerTokens} />
+          <ThreeHeader/>
         ) : (
           <div className="flex justify-center items-center py-8">
             <img
