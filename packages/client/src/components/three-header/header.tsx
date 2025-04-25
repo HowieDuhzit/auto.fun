@@ -3,12 +3,21 @@ import * as THREE from 'three';
 import ThreeScene from './three/scene';
 import { BoxMesh } from './three/mesh/boxMesh';
 import { EyeMesh } from './three/mesh/eyeMesh';
+import { SlotMesh } from './three/mesh/slotMesh';
+import SlotMachine from './three/slot/SlotMachine';
 
 export default function ThreeHeader() {
     const containerRef = useRef<HTMLDivElement>(null);
     const threeSceneRef = useRef<ThreeScene | null>(null);
     const boxMeshRef = useRef<BoxMesh | null>(null);
     const eyeMeshRef = useRef<EyeMesh | null>(null);
+    const slotMeshRef = useRef<SlotMachine | null>(null);
+
+    const handleClick = () => {
+        if (slotMeshRef.current) {
+            slotMeshRef.current.startAnimation();
+        }
+    }
 
 
     useEffect(() => {
@@ -24,11 +33,15 @@ export default function ThreeHeader() {
             const followRadius = 1;
             const eyeMesh1 = new EyeMesh(eyeSize, new THREE.Color(0x000000), followRadius, worldPosition1);
             const eyeMesh2 = new EyeMesh(eyeSize, new THREE.Color(0x000000), followRadius, worldPosition2);
+            const slotMachine = new SlotMachine(2);
 
             threeSceneRef.current.addEyeMesh(eyeMesh1);
             threeSceneRef.current.addEyeMesh(eyeMesh2);
+            threeSceneRef.current.addSlotMachine(slotMachine);
 
             threeScene.setInteractionPlaneZ(worldPosition1.z);
+
+            slotMeshRef.current = slotMachine;
 
             const handleResize = () => {
                 if (containerRef.current && threeSceneRef.current) {
@@ -54,6 +67,7 @@ export default function ThreeHeader() {
 
     return (
         <div
+            onClick={handleClick}
             ref={containerRef}
             className='w-full h-[300px] relative overflow-hidden'
         >

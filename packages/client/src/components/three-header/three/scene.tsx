@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AutoMesh } from './mesh/automesh';
 import { EyeMesh } from './mesh/eyeMesh';
+import SlotMachine from './slot/SlotMachine';
 
 function disposeMaterial(material: THREE.Material | THREE.Material[]): void {
   if (Array.isArray(material)) {
@@ -29,6 +30,7 @@ class ThreeScene {
   private renderer: THREE.WebGLRenderer;
   private autoMeshes: AutoMesh[] = [];
   private eyeMeshes: EyeMesh[] = [];
+  private slotMachines: SlotMachine[] = [];
   private animationFrameId: number | null = null;
 
   private mousePosition: THREE.Vector2 = new THREE.Vector2();
@@ -115,6 +117,13 @@ class ThreeScene {
       this.scene.add(eyeMesh.getMesh());
   }
 
+  public addSlotMachine(slotMachine: SlotMachine): void {
+      this.slotMachines.push(slotMachine);
+      for (const slot of slotMachine.getSlots()) {
+          this.scene.add(slot.getMesh());
+      }
+  }
+
   setSize(width: number, height: number): void {
     const aspect = width / height;
     const viewSize = 5; 
@@ -143,6 +152,15 @@ class ThreeScene {
         shouldUpdate = true;
       }
     }
+
+    for (const slotMachine of this.slotMachines) {
+      if (slotMachine.shouldUpdate()) {
+        slotMachine.update(this.mouseWorldPosition);
+        shouldUpdate = true;
+      }
+    }
+
+
 
     if (shouldUpdate) {
       this.render();
